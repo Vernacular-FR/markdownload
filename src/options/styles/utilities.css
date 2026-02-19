@@ -1,0 +1,71 @@
+/* Utility classes (layout, spacing, borders, backgrounds, typography, states) */
+
+/* Spacing */
+.p-0 { padding: 0; }
+.p-4 { padding: var(--spacing-xs); }
+.p-8 { padding: var(--spacing-sm); }
+.p-12 { padding: var(--spacing-md); }
+.p-16 { padding: var(--spacing-lg); }
+.px-12 { padding-left: var(--spacing-md); padding-right: var(--spacing-md); }
+.py-12 { padding-top: var(--spacing-md); padding-bottom: var(--spacing-md); }
+
+.m-0 { margin: 0; }
+.m-8 { margin: var(--spacing-sm); }
+.m-12 { margin: var(--spacing-md); }
+.m-16 { margin: var(--spacing-lg); }
+.mb-12 { margin-bottom: var(--spacing-md); }
+.mb-16 { margin-bottom: var(--spacing-lg); }
+.mx-auto { margin-left: auto; margin-right: auto; }
+
+/* Borders */
+.border { border: 1px solid var(--color-border); }
+.border-t { border-top: 1px solid var(--color-border); }
+.border-b { border-bottom: 1px solid var(--color-border); }
+.border-none { border: none; }
+.rounded { border-radius: var(--border-radius-md); }
+.rounded-t { border-radius: var(--border-radius-md) var(--border-radius-md) 0 0; }
+.rounded-b { border-radius: 0 0 var(--border-radius-md) var(--border-radius-md); }
+
+/* Backgrounds */
+.bg-card { background: var(--color-background); }
+.bg-secondary { background: var(--color-background-secondary); }
+.bg-transparent { background: transparent; }
+
+/* Flexbox */
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.flex-row { flex-direction: row; }
+.flex-wrap { flex-wrap: wrap; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.items-stretch { align-items: stretch; }
+.justify-center { justify-content: center; }
+.justify-start { justify-content: flex-start; }
+.gap-4 { gap: var(--spacing-xs); }
+.gap-8 { gap: var(--spacing-sm); }
+
+/* Sizing */
+.w-full { width: 100%; }
+.max-w-1100 { max-width: 880px; }
+
+/* Positioning */
+.relative { position: relative; }
+.fixed { position: fixed; }
+
+/* Typography */
+.font-sans { font-family: var(--font-family-base); }
+.font-mono { font-family: var(--font-family-base); }
+.text-sm { font-size: var(--font-size-sm); }
+.text-xs { font-size: var(--font-size-xs); }
+.text-foreground { color: var(--color-text-primary); }
+.text-muted { color: var(--color-text-secondary); }
+.font-medium { font-weight: 500; }
+.font-semibold { font-weight: 600; }
+.leading-relaxed { line-height: var(--line-height-base); }
+.cursor-pointer { cursor: pointer; }
+.user-select-none { user-select: none; }
+
+/* States */
+.hover-accent:hover { background: var(--color-primary-hover); }
+.hover-primary:hover { background: var(--color-primary); }
+.transition { transition: all var(--transition-fast); }

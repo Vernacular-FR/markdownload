@@ -1,0 +1,62 @@
+<div class="form-card">
+                <h3>Context Menus</h3>
+                <p class="section-description text-muted leading-relaxed">
+                    Context menus anable you to download multiple tabs at once through a right-click on the extension icon.
+                </p>
+            <div class="checkbox-container" id="contextMenus-container">
+                <input name="contextMenus" id="contextMenus" type="checkbox" />
+                <label for="contextMenus">Enable Context Menus</label>
+            </div>
+        </div>
+
+        <div class="form-card">
+            <h3>Download Mode</h3>
+            <div class="radio-container" id="downloadMode">
+                <p class="section-description text-muted leading-relaxed">
+                    Method to use for downloading Markdown files. Set to "Content Link" if you're having trouble with the Downloads API
+                    (Sometimes conflicts can occur with other download extensions, leading to randomly generated filenames and other symptoms). <br/>
+                </p>
+                <p class="section-description text-muted leading-relaxed">
+                    <strong>Note:</strong> "Content Link" mode disables some functionality such as downloading images or using subfolders in the filename.
+                </p>
+                <input type="radio" name="downloadMode" id="downloadsApi" value="downloadsApi" />
+                <label for="downloadsApi">Downloads API (recommended)</label>
+                <input type="radio" name="downloadMode" id="contentLink" value="contentLink" />
+                <label for="contentLink">Content Link</label>
+            </div>
+        </div>
+
+        <div class="form-card">
+            <h3>Download destination</h3>
+            <div id="downloadModeGroup">
+                <div class="checkbox-container" id="saveAs-container">
+                    <input name="saveAs" id="saveAs" type="checkbox" />
+                    <label for="saveAs">Always show Save As dialog (regardless of browser setting)</label>
+                </div>
+
+                <div class="textbox-container" id="mdClipsFolder">
+                    <label for="mdClipsFolder">Folder inside <code>Downloads/</code> to store MarkDownload clips:</label>
+                    <input type="text" name="mdClipsFolder" role="textbox" />
+                </div>
+            </div>
+        </div>
+
+        <div class="form-card">
+            <h3>Obsidian Integration</h3>
+            <p class="section-description text-muted leading-relaxed">
+                For integration with obsidian, you need to install and enable community plugins named <code>Advanced Obsidian URI</code>. This plugin help us to bypass character limitation in URL. Because it's using clipboard as the source for creating new file.
+                More information:  <a href="https://vinzent03.github.io/obsidian-advanced-uri/">Obsidian Advanced URI</a><br/>
+            </p>
+
+            <div class="checkbox-container" id="obsidian-container">
+                <input name="obsidianIntegration" id="obsidianIntegration" type="checkbox" />
+                <label for="obsidianIntegration">Enable Obsidian Integration</label>
+            </div>
+
+            <div class="textbox-container" id="obsidianVault">
+                <label for="obsidianVault">Obsidian Vault Name: </label>
+                <input type="text" name="obsidianVault" role="textbox" placeholder="If blank, it will use the main Vault. Please specify it." />
+                <label for="obsidianFolder">Obsidian Folder Name: </label>
+                <input type="text" name="obsidianFolder" role="textbox" placeholder="Enter Folder Name eg. Clippers"/>
+            </div>
+        </div>

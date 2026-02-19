@@ -1,46 +1,164 @@
-// log some info
-browser.runtime.getPlatformInfo().then(async platformInfo => {
-  const browserInfo = browser.runtime.getBrowserInfo ? await browser.runtime.getBrowserInfo() : "Can't get browser info"
-  console.info(platformInfo, browserInfo);
-});
+// Bundled background (MV2) - core modules inlined
+// Dependencies (loaded via manifest): browser-polyfill, libs/*
 
-// add notification listener for foreground page messages
-browser.runtime.onMessage.addListener(notify);
-// create context menus
-createMenus()
+// ---- utils.js ----
+function validateUri(href, baseURI) {
+  try { new URL(href); return href; } catch (e) {
+    try { return new URL(href, baseURI).href; } catch (e2) { return href; }
+  }
+}
+function getImageFilename(src, options, prependFilePath = true) {
+  const slashPos = src.lastIndexOf('/');
+  const queryPos = src.indexOf('?');
+  let filename = src.substring(slashPos + 1, queryPos > 0 ? queryPos : src.length);
+  const hashPos = filename.indexOf('#');
+  if (hashPos > 0) filename = filename.substring(0, hashPos);
+  // sanitize illegal characters for filesystem
+  filename = filename.replace(/[\/\?<>\\:\*\|":]/g, '_');
+  if (prependFilePath && options.imagePath) filename = options.imagePath + filename;
+  return filename;
+}
+function textReplace(string, article, disallowedChars = null) {
+  if (string == null) string = '';
+  for (const key in article) {
+    if (article.hasOwnProperty(key) && key != "content") {
+      let s = (article[key] || '') + '';
+      string = string.split('{' + key + '}').join(s);
+    }
+  }
+  const date = new Date();
+  string = string.split('{date}').join(date.toISOString().split('T')[0]);
+  string = string.split('{datetime}').join(date.toISOString().replace('T', ' ').split('.')[0]);
+  string = string.split('{timestamp}').join(date.getTime());
+  if (disallowedChars) {
+    for (let c of disallowedChars) string = string.split(c).join('');
+  }
+  return string;
+}
+function generateValidFileName(title, disallowedChars = null, maxLength = null) {
+  if (!title) return title; else title = title + '';
+  var illegalRe = /[\/\?<>\\:\*\|":]/g;
+  var name = title.replace(illegalRe, "").replace(new RegExp('\u00A0', 'g'), ' ') // nbsp
+      .replace(new RegExp(/\s+/, 'g'), ' ').trim();
+  if (disallowedChars) {
+    for (let c of disallowedChars) {
+      if (`[\\^$.|?*+()`.includes(c)) c = `\\${c}`;
+      name = name.replace(new RegExp(c, 'g'), '');
+    }
+  }
+  // Tronquer intelligemment si maxLength est spécifié
+  if (maxLength && name.length > maxLength) {
+    // Trouver le dernier espace avant maxLength pour couper sur un mot complet
+    const lastSpace = name.lastIndexOf(' ', maxLength);
+    if (lastSpace > maxLength * 0.7) { // Au moins 70% de la longueur max
+      name = name.substring(0, lastSpace);
+    } else {
+      name = name.substring(0, maxLength);
+    }
+    name = name.trim();
+  }
+  return name;
+}
+function base64EncodeUnicode(str) {
+  const utf8Bytes = encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function (match, p1) {
+    return String.fromCharCode('0x' + p1);
+  });
+  return btoa(utf8Bytes);
+}
 
-TurndownService.prototype.defaultEscape = TurndownService.prototype.escape;
+// ---- image-handler.js ----
+function findOriginalImageUrl(node) {
+  const dataSrc = node.getAttribute('data-src');
+  if (dataSrc) return dataSrc;
+  const srcset = node.getAttribute('srcset');
+  if (srcset) {
+    const sources = srcset.split(',').map(s => s.trim().split(/\s+/));
+    sources.sort((a, b) => (parseInt(b[1])||0) - (parseInt(a[1])||0));
+    return sources[0] ? sources[0][0] : null;
+  }
+  const src = node.getAttribute('src');
+  if (src && src.includes('medium.com')) {
+    return src.replace(/\/v2\/resize:[^\/]+\//g, '/');
+  }
+  return src;
+}
+function fetchImageAsUint8Array(url) {
+  return new Promise((resolve, reject) => {
+    if (url.startsWith('data:')) {
+      const match = url.match(/^data:([^;]+);base64,(.+)$/);
+      if (!match) return reject(new Error('Invalid data: URL'));
+      const binary = atob(match[2]);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return resolve(bytes);
+    }
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url);
+    xhr.responseType = 'arraybuffer';
+    xhr.timeout = 15000;
+    xhr.onload = function() {
+      if (xhr.status >= 200 && xhr.status < 300) resolve(new Uint8Array(xhr.response));
+      else reject(new Error('HTTP ' + xhr.status));
+    };
+    xhr.onerror = () => reject(new Error('Network error'));
+    xhr.ontimeout = () => reject(new Error('Timeout'));
+    xhr.send();
+  });
+}
+async function preDownloadImages(imageList, markdown, options) {
+  let newImageList = {};
+  await Promise.all(Object.entries(imageList).map(([src, filename]) => new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', src);
+    xhr.responseType = "blob";
+    xhr.onload = async function () {
+      const blob = xhr.response;
+      if (options.imageStyle == 'base64') {
+        var reader = new FileReader();
+        reader.onloadend = function () {
+          markdown = markdown.replaceAll(src, reader.result);
+          resolve();
+        };
+        reader.readAsDataURL(blob);
+      } else {
+        let newFilename = filename;
+        if (newFilename.endsWith('.idunno') && window.mimedb) {
+          newFilename = filename.replace('.idunno', '.' + mimedb[blob.type]);
+          if (!options.imageStyle.startsWith("obsidian")) {
+            markdown = markdown.replaceAll(filename.split('/').map(s => encodeURI(s)).join('/'), newFilename.split('/').map(s => encodeURI(s)).join('/'))
+          } else {
+            markdown = markdown.replaceAll(filename, newFilename);
+          }
+        }
+        newImageList[src] = newFilename;
+        resolve();
+      }
+    };
+    xhr.onerror = function() { console.warn("Failed to pre-download image:", src); resolve(); };
+    xhr.send();
+  })));
+  return { markdown, imageList: newImageList };
+}
 
-// function to convert the article content to markdown using Turndown
-function turndown(content, options, article) {
-
+// ---- turndown.js (rule setup) ----
+function setupTurndown(content, options, article, includeImageLinks = false) {
   if (options.turndownEscape) TurndownService.prototype.escape = TurndownService.prototype.defaultEscape;
   else TurndownService.prototype.escape = s => s;
-
   var turndownService = new TurndownService(options);
-
-  turndownService.use(turndownPluginGfm.gfm)
-
+  turndownService.use(turndownPluginGfm.gfm);
   turndownService.keep(['iframe', 'sub', 'sup', 'u', 'ins', 'del', 'small', 'big']);
-
   let imageList = {};
-  // add an image rule
   turndownService.addRule('images', {
-    filter: function (node, tdopts) {
-      // if we're looking at an img node with a src
+    filter: function (node) {
       if (node.nodeName == 'IMG' && node.getAttribute('src')) {
-        
-        // get the original src
-        let src = node.getAttribute('src')
-        // set the new src
+        let src = node.getAttribute('src');
         node.setAttribute('src', validateUri(src, article.baseURI));
-        
-        // if we're downloading images, there's more to do.
+        // Toujours collecter les images pour le téléchargement, mais ne générer les inserts que si includeImageLinks=true
         if (options.downloadImages) {
-          // generate a file name for the image
-          let imageFilename = getImageFilename(src, options, false);
-          if (!imageList[src] || imageList[src] != imageFilename) {
-            // if the imageList already contains this file, add a number to differentiate
+          const originalSrc = findOriginalImageUrl(node) || src;
+          if (!originalSrc) return true;
+          let imageFilename = getImageFilename(originalSrc, options, false);
+          if (!imageList[originalSrc] || imageList[originalSrc] != imageFilename) {
             let i = 1;
             while (Object.values(imageList).includes(imageFilename)) {
               const parts = imageFilename.split('.');
@@ -48,34 +166,24 @@ function turndown(content, options, article) {
               else parts.splice(parts.length - 2, 1, i++);
               imageFilename = parts.join('.');
             }
-            // add it to the list of images to download later
-            imageList[src] = imageFilename;
+            imageList[originalSrc] = imageFilename;
           }
-          // check if we're doing an obsidian style link
           const obsidianLink = options.imageStyle.startsWith("obsidian");
-          // figure out the (local) src of the image
           const localSrc = options.imageStyle === 'obsidian-nofolder'
-            // if using "nofolder" then we just need the filename, no folder
             ? imageFilename.substring(imageFilename.lastIndexOf('/') + 1)
-            // otherwise we may need to modify the filename to uri encode parts for a pure markdown link
-            : imageFilename.split('/').map(s => obsidianLink ? s : encodeURI(s)).join('/')
-          
-          // set the new src attribute to be the local filename
+            : imageFilename.split('/').map(s => obsidianLink ? s : encodeURI(s)).join('/');
           if(options.imageStyle != 'originalSource' && options.imageStyle != 'base64') node.setAttribute('src', localSrc);
-          // pass the filter if we're making an obsidian link (or stripping links)
           return true;
         }
-        else return true
+        else return true;
       }
-      // don't pass the filter, just output a normal markdown link
       return false;
     },
-    replacement: function (content, node, tdopts) {
-      // if we're stripping images, output nothing
+    replacement: function (content, node) {
+      // Si includeImageLinks=false, ne rien générer (pas de placeholders)
+      if (!includeImageLinks) return '';
       if (options.imageStyle == 'noImage') return '';
-      // if this is an obsidian link, so output that
       else if (options.imageStyle.startsWith('obsidian')) return `![[${node.getAttribute('src')}]]`;
-      // otherwise, output the normal markdown link
       else {
         var alt = cleanAttribute(node.getAttribute('alt'));
         var src = node.getAttribute('src') || '';
@@ -86,486 +194,608 @@ function turndown(content, options, article) {
           this.references.push('[fig' + id + ']: ' + src + titlePart);
           return '![' + alt + '][fig' + id + ']';
         }
-        else return src ? '![' + alt + ']' + '(' + src + titlePart + ')' : ''
+        else return src ? '![' + alt + '](' + src + titlePart + ')' : '';
       }
     },
     references: [],
-    append: function (options) {
+    append: function () {
       var references = '';
       if (this.references.length) {
         references = '\n\n' + this.references.join('\n') + '\n\n';
-        this.references = []; // Reset references
+        this.references = [];
       }
-      return references
+      return references;
     }
-
   });
-
-  // add a rule for links
   turndownService.addRule('links', {
-    filter: (node, tdopts) => {
-      // check that this is indeed a link
-      if (node.nodeName == 'A' && node.getAttribute('href')) {
-        // get the href
-        const href = node.getAttribute('href');
-        // set the new href
-        node.setAttribute('href', validateUri(href, article.baseURI));
-        // if we are to strip links, the filter needs to pass
-        return options.linkStyle == 'stripLinks';
+    filter: function (node) { return node.nodeName == 'A' && node.getAttribute('href'); },
+    replacement: function (content, node) {
+      var href = node.getAttribute('href');
+      var title = cleanAttribute(node.getAttribute('title'));
+      var titlePart = title ? ' "' + title + '"' : '';
+      if (options.linkStyle == 'inlined' || options.linkStyle == 'inlinedCaps') {
+        if (options.linkStyle == 'inlinedCaps') content = content.toUpperCase();
+        return '[' + content + '](' + href + titlePart + ')';
       }
-      // we're not passing the filter, just do the normal thing.
-      return false;
-    },
-    // if the filter passes, we're stripping links, so just return the content
-    replacement: (content, node, tdopts) => content
-  });
-
-  // handle multiple lines math
-  turndownService.addRule('mathjax', {
-    filter(node, options) {
-      return article.math.hasOwnProperty(node.id);
-    },
-    replacement(content, node, options) {
-      const math = article.math[node.id];
-      let tex = math.tex.trim().replaceAll('\xa0', '');
-
-      if (math.inline) {
-        tex = tex.replaceAll('\n', ' ');
-        return `$${tex}$`;
+      else if (options.linkStyle == 'referenced') {
+        var id = this.references.length + 1;
+        this.references.push('[' + id + ']: ' + href + titlePart);
+        return '[' + content + '][' + id + ']';
       }
-      else
-        return `$$\n${tex}\n$$`;
+      else return content;
+    },
+    references: [],
+    append: function () {
+      var references = '';
+      if (this.references.length) {
+        references = '\n\n' + this.references.join('\n') + '\n\n';
+        this.references = [];
+      }
+      return references;
     }
   });
-
-  function repeat(character, count) {
-    return Array(count + 1).join(character);
-  }
-
-  function convertToFencedCodeBlock(node, options) {
-    node.innerHTML = node.innerHTML.replaceAll('<br-keep></br-keep>', '<br>');
-    const langMatch = node.id?.match(/code-lang-(.+)/);
-    const language = langMatch?.length > 0 ? langMatch[1] : '';
-
-    const code = node.innerText;
-
-    const fenceChar = options.fence.charAt(0);
-    let fenceSize = 3;
-    const fenceInCodeRegex = new RegExp('^' + fenceChar + '{3,}', 'gm');
-
-    let match;
-    while ((match = fenceInCodeRegex.exec(code))) {
-      if (match[0].length >= fenceSize) {
-        fenceSize = match[0].length + 1;
-      }
-    }
-
-    const fence = repeat(fenceChar, fenceSize);
-
-    return (
-      '\n\n' + fence + language + '\n' +
-      code.replace(/\n$/, '') +
-      '\n' + fence + '\n\n'
-    )
-  }
-
-  turndownService.addRule('fencedCodeBlock', {
-    filter: function (node, options) {
-      return (
-        options.codeBlockStyle === 'fenced' &&
-        node.nodeName === 'PRE' &&
-        node.firstChild &&
-        node.firstChild.nodeName === 'CODE'
-      );
-    },
-    replacement: function (content, node, options) {
-      return convertToFencedCodeBlock(node.firstChild, options);
+  turndownService.addRule('codeBlocks', {
+    filter: function (node) { return node.nodeName == 'PRE' && node.firstChild && node.firstChild.nodeName == 'CODE'; },
+    replacement: function (content, node) {
+      var code = node.firstChild.textContent;
+      var language = node.firstChild.getAttribute('class') || '';
+      if (language) language = language.replace('language-', '');
+      return '```' + language + '\n' + code + '\n```';
     }
   });
-
-  // handle <pre> as code blocks
-  turndownService.addRule('pre', {
-    filter: (node, tdopts) => {
-      return node.nodeName == 'PRE'
-             && (!node.firstChild || node.firstChild.nodeName != 'CODE')
-             && !node.querySelector('img');
+  turndownService.addRule('code', {
+    filter: function (node) {
+      var hasSiblings = node.previousSibling || node.nextSibling;
+      var isNameCode = node.nodeName == 'CODE' && !hasSiblings;
+      return isNameCode;
     },
-    replacement: (content, node, tdopts) => {
-      return convertToFencedCodeBlock(node, tdopts);
-    }
+    replacement: function (content) { return '`' + content + '`'; }
   });
-
-  let markdown = options.frontmatter + turndownService.turndown(content)
-      + options.backmatter;
-
-  // strip out non-printing special characters which CodeMirror displays as a red dot
-  // see: https://codemirror.net/doc/manual.html#option_specialChars
-  markdown = markdown.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028\u2029\ufeff\ufff9-\ufffc]/g, '');
-  
-  return { markdown: markdown, imageList: imageList };
-}
-
-function cleanAttribute(attribute) {
-  return attribute ? attribute.replace(/(\n+\s*)+/g, '\n') : ''
-}
-
-function validateUri(href, baseURI) {
-  // check if the href is a valid url
-  try {
-    new URL(href);
-  }
-  catch {
-    // if it's not a valid url, that likely means we have to prepend the base uri
-    const baseUri = new URL(baseURI);
-
-    // if the href starts with '/', we need to go from the origin
-    if (href.startsWith('/')) {
-      href = baseUri.origin + href
-    }
-    // otherwise we need to go from the local folder
-    else {
-      href = baseUri.href + (baseUri.href.endsWith('/') ? '/' : '') + href
-    }
-  }
-  return href;
-}
-
-function getImageFilename(src, options, prependFilePath = true) {
-  const slashPos = src.lastIndexOf('/');
-  const queryPos = src.indexOf('?');
-  let filename = src.substring(slashPos + 1, queryPos > 0 ? queryPos : src.length);
-
-  let imagePrefix = (options.imagePrefix || '');
-
-  if (prependFilePath && options.title.includes('/')) {
-    imagePrefix = options.title.substring(0, options.title.lastIndexOf('/') + 1) + imagePrefix;
-  }
-  else if (prependFilePath) {
-    imagePrefix = options.title + (imagePrefix.startsWith('/') ? '' : '/') + imagePrefix
-  }
-  
-  if (filename.includes(';base64,')) {
-    // this is a base64 encoded image, so what are we going to do for a filename here?
-    filename = 'image.' + filename.substring(0, filename.indexOf(';'));
-  }
-  
-  let extension = filename.substring(filename.lastIndexOf('.'));
-  if (extension == filename) {
-    // there is no extension, so we need to figure one out
-    // for now, give it an 'idunno' extension and we'll process it later
-    filename = filename + '.idunno';
-  }
-
-  filename = generateValidFileName(filename, options.disallowedChars);
-
-  return imagePrefix + filename;
-}
-
-// function to replace placeholder strings with article info
-function textReplace(string, article, disallowedChars = null) {
-  for (const key in article) {
-    if (article.hasOwnProperty(key) && key != "content") {
-      let s = (article[key] || '') + '';
-      if (s && disallowedChars) s = this.generateValidFileName(s, disallowedChars);
-
-      string = string.replace(new RegExp('{' + key + '}', 'g'), s)
-        .replace(new RegExp('{' + key + ':lower}', 'g'), s.toLowerCase())
-        .replace(new RegExp('{' + key + ':upper}', 'g'), s.toUpperCase())
-        .replace(new RegExp('{' + key + ':kebab}', 'g'), s.replace(/ /g, '-').toLowerCase())
-        .replace(new RegExp('{' + key + ':mixed-kebab}', 'g'), s.replace(/ /g, '-'))
-        .replace(new RegExp('{' + key + ':snake}', 'g'), s.replace(/ /g, '_').toLowerCase())
-        .replace(new RegExp('{' + key + ':mixed_snake}', 'g'), s.replace(/ /g, '_'))
-        // For Obsidian Custom Attachment Location plugin, we need to replace spaces with hyphens, but also remove any double hyphens.
-        .replace(new RegExp('{' + key + ':obsidian-cal}', 'g'), s.replace(/ /g, '-').replace(/-{2,}/g, "-"))
-        .replace(new RegExp('{' + key + ':camel}', 'g'), s.replace(/ ./g, (str) => str.trim().toUpperCase()).replace(/^./, (str) => str.toLowerCase()))
-        .replace(new RegExp('{' + key + ':pascal}', 'g'), s.replace(/ ./g, (str) => str.trim().toUpperCase()).replace(/^./, (str) => str.toUpperCase()))
-    }
-  }
-
-  // replace date formats
-  const now = new Date();
-  const dateRegex = /{date:(.+?)}/g
-  const matches = string.match(dateRegex);
-  if (matches && matches.forEach) {
-    matches.forEach(match => {
-      const format = match.substring(6, match.length - 1);
-      const dateString = moment(now).format(format);
-      string = string.replaceAll(match, dateString);
-    });
-  }
-
-  // replace keywords
-  const keywordRegex = /{keywords:?(.*)?}/g
-  const keywordMatches = string.match(keywordRegex);
-  if (keywordMatches && keywordMatches.forEach) {
-    keywordMatches.forEach(match => {
-      let seperator = match.substring(10, match.length - 1)
-      try {
-        seperator = JSON.parse(JSON.stringify(seperator).replace(/\\\\/g, '\\'));
-      }
-      catch { }
-      const keywordsString = (article.keywords || []).join(seperator);
-      string = string.replace(new RegExp(match.replace(/\\/g, '\\\\'), 'g'), keywordsString);
-    })
-  }
-
-  // replace anything left in curly braces
-  const defaultRegex = /{(.*?)}/g
-  string = string.replace(defaultRegex, '')
-
-  return string;
-}
-
-// function to convert an article info object into markdown
-async function convertArticleToMarkdown(article, downloadImages = null) {
-  const options = await getOptions();
-  if (downloadImages != null) {
-    options.downloadImages = downloadImages;
-  }
-
-  // substitute front and backmatter templates if necessary
-  if (options.includeTemplate) {
-    options.frontmatter = textReplace(options.frontmatter, article) + '\n';
-    options.backmatter = '\n' + textReplace(options.backmatter, article);
-  }
-  else {
-    options.frontmatter = options.backmatter = '';
-  }
-
-  options.imagePrefix = textReplace(options.imagePrefix, article, options.disallowedChars)
-    .split('/').map(s=>generateValidFileName(s, options.disallowedChars)).join('/');
-
-  let result = turndown(article.content, options, article);
-  if (options.downloadImages && options.downloadMode == 'downloadsApi') {
-    // pre-download the images
-    result = await preDownloadImages(result.imageList, result.markdown);
-  }
-  return result;
-}
-
-// function to turn the title into a valid file name
-function generateValidFileName(title, disallowedChars = null) {
-  if (!title) return title;
-  else title = title + '';
-  // remove < > : " / \ | ? * 
-  var illegalRe = /[\/\?<>\\:\*\|":]/g;
-  // and non-breaking spaces (thanks @Licat)
-  var name = title.replace(illegalRe, "").replace(new RegExp('\u00A0', 'g'), ' ')
-      // collapse extra whitespace
-      .replace(new RegExp(/\s+/, 'g'), ' ')
-      // remove leading/trailing whitespace that can cause issues when using {pageTitle} in a download path
-      .trim();
-
-  if (disallowedChars) {
-    for (let c of disallowedChars) {
-      if (`[\\^$.|?*+()`.includes(c)) c = `\\${c}`;
-      name = name.replace(new RegExp(c, 'g'), '');
-    }
-  }
-  
-  return name;
-}
-
-async function preDownloadImages(imageList, markdown) {
-  const options = await getOptions();
-  let newImageList = {};
-  // originally, I was downloading the markdown file first, then all the images
-  // however, in some cases we need to download images *first* so we can get the
-  // proper file extension to put into the markdown.
-  // so... here we are waiting for all the downloads and replacements to complete
-  await Promise.all(Object.entries(imageList).map(([src, filename]) => new Promise((resolve, reject) => {
-        // we're doing an xhr so we can get it as a blob and determine filetype
-        // before the final save
-        const xhr = new XMLHttpRequest();
-        xhr.open('GET', src);
-        xhr.responseType = "blob";
-        xhr.onload = async function () {
-          // here's the returned blob
-          const blob = xhr.response;
-
-          if (options.imageStyle == 'base64') {
-            var reader = new FileReader();
-            reader.onloadend = function () {
-              markdown = markdown.replaceAll(src, reader.result)
-              resolve()
-            }
-            reader.readAsDataURL(blob);
-          }
-          else {
-
-            let newFilename = filename;
-            if (newFilename.endsWith('.idunno')) {
-              // replace any unknown extension with a lookup based on mime type
-              newFilename = filename.replace('.idunno', '.' + mimedb[blob.type]);
-
-              // and replace any instances of this in the markdown
-              // remember to url encode for replacement if it's not an obsidian link
-              if (!options.imageStyle.startsWith("obsidian")) {
-                markdown = markdown.replaceAll(filename.split('/').map(s => encodeURI(s)).join('/'), newFilename.split('/').map(s => encodeURI(s)).join('/'))
-              }
-              else {
-                markdown = markdown.replaceAll(filename, newFilename)
-              }
-            }
-
-            // create an object url for the blob (no point fetching it twice)
-            const blobUrl = URL.createObjectURL(blob);
-
-            // add this blob into the new image list
-            newImageList[blobUrl] = newFilename;
-
-            // resolve this promise now
-            // (the file might not be saved yet, but the blob is and replacements are complete)
-            resolve();
-          }
-        };
-        xhr.onerror = function () {
-          reject('A network error occurred attempting to download ' + src);
-        };
-        xhr.send();
-  })));
-
-  return { imageList: newImageList, markdown: markdown };
-}
-
-// function to actually download the markdown file
-async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsFolder = '') {
-  // get the options
-  const options = await getOptions();
-  
-  // download via the downloads API
-  if (options.downloadMode == 'downloadsApi' && browser.downloads) {
-    
-    // create the object url with markdown data as a blob
-    const url = URL.createObjectURL(new Blob([markdown], {
-      type: "text/markdown;charset=utf-8"
-    }));
-  
-    try {
-
-      if(mdClipsFolder && !mdClipsFolder.endsWith('/')) mdClipsFolder += '/';
-      // start the download
-      const id = await browser.downloads.download({
-        url: url,
-        filename: mdClipsFolder + title + ".md",
-        saveAs: options.saveAs
-      });
-
-      // add a listener for the download completion
-      browser.downloads.onChanged.addListener(downloadListener(id, url));
-
-      // download images (if enabled)
-      if (options.downloadImages) {
-        // get the relative path of the markdown file (if any) for image path
-        let destPath = mdClipsFolder + title.substring(0, title.lastIndexOf('/'));
-        if(destPath && !destPath.endsWith('/')) destPath += '/';
-        Object.entries(imageList).forEach(async ([src, filename]) => {
-          // start the download of the image
-          const imgId = await browser.downloads.download({
-            url: src,
-            // set a destination path (relative to md file)
-            filename: destPath ? destPath + filename : filename,
-            saveAs: false
-          })
-          // add a listener (so we can release the blob url)
-          browser.downloads.onChanged.addListener(downloadListener(imgId, src));
+  turndownService.addRule('strikethrough', {
+    filter: function (node) { return node.nodeName == 'S' || node.nodeName == 'DEL' || node.nodeName == 'STRIKE'; },
+    replacement: function (content) { return '~~' + content + '~~'; }
+  });
+  turndownService.addRule('highlight', {
+    filter: function (node) { return node.nodeName == 'MARK'; },
+    replacement: function (content) { return '==' + content + '=='; }
+  });
+  turndownService.addRule('footnotes', {
+    filter: function (node) { return node.nodeName == 'SUP' && node.getAttribute('class') == 'footnote'; },
+    replacement: function (content) { return '[^' + content + ']'; }
+  });
+  turndownService.addRule('tables', {
+    filter: function (node) { return node.nodeName == 'TABLE'; },
+    replacement: function (content, node) {
+      var tables = [], table = [], headers = [];
+      var rows = node.querySelectorAll('tr');
+      rows.forEach(function (row) {
+        var cells = row.querySelectorAll('td, th');
+        var rowText = [];
+        cells.forEach(function (cell) {
+          var cellText = turndownService.turndown(cell.innerHTML);
+          rowText.push(cellText);
         });
+        if (row.parentNode.nodeName == 'THEAD') headers.push(rowText);
+        else table.push(rowText);
+      });
+      if (headers.length) {
+        tables.push(headers[0].join(' | '));
+        tables.push(headers[0].map(function () { return '---'; }).join(' | '));
+      }
+      table.forEach(function (row) { tables.push(row.join(' | ')); });
+      return '\n\n' + tables.join('\n') + '\n\n';
+    }
+  });
+  var markdown = turndownService.turndown(content);
+  markdown = markdown.replace(/^Press enter or click to view image in full size\s*$/gmi, '').replace(/\n{3,}/g, '\n\n');
+  return { markdown, imageList };
+}
+function cleanAttribute(attribute) { return attribute ? attribute.replace(/(\n+\s*)+/g, '\n') : ''; }
+
+// ---- converter.js ----
+async function convertArticleToMarkdown(article, downloadImages = null, skipPreDownload = false, includeImageLinks = false) {
+  const options = await getOptions();
+  if (downloadImages != null) options.downloadImages = downloadImages;
+  // Compute imageStyle if not present (same logic as options.js)
+  if (!options.imageStyle && options.imageStyleWith && options.imageStyleWithout) {
+    options.imageStyle = options.downloadImages ? options.imageStyleWith : options.imageStyleWithout;
+  }
+  if (!options.downloadImages) options.imageStyle = 'noImage';
+  let imageList = {};
+  const result = setupTurndown(article.content, options, article, includeImageLinks);
+  let markdown = result.markdown; imageList = result.imageList;
+  markdown = markdown.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '');
+  if (options.downloadImages) {
+    const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g; let match; const usedImages = new Set();
+    while ((match = imageRegex.exec(markdown)) !== null) {
+      const imageUrl = match[2];
+      if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://') && !imageUrl.startsWith('data:')) {
+        for (const [src, localPath] of Object.entries(imageList)) {
+          const normalized = localPath.split('\\').join('/').replace(/^\//, '');
+          if (imageUrl === normalized || imageUrl.endsWith(normalized)) { usedImages.add(src); break; }
+        }
       }
     }
-    catch (err) {
-      console.error("Download failed", err);
-    }
+    const newImageList = {}; for (const src of usedImages) newImageList[src] = imageList[src];
+    imageList = newImageList;
   }
-  // // download via obsidian://new uri
-  // else if (options.downloadMode == 'obsidianUri') {
-  //   try {
-  //     await ensureScripts(tabId);
-  //     let uri = 'obsidian://new?';
-  //     uri += `${options.obsidianPathType}=${encodeURIComponent(title)}`;
-  //     if (options.obsidianVault) uri += `&vault=${encodeURIComponent(options.obsidianVault)}`;
-  //     uri += `&content=${encodeURIComponent(markdown)}`;
-  //     let code = `window.location='${uri}'`;
-  //     await browser.tabs.executeScript(tabId, {code: code});
-  //   }
-  //   catch (error) {
-  //     // This could happen if the extension is not allowed to run code in
-  //     // the page, for example if the tab is a privileged page.
-  //     console.error("Failed to execute script: " + error);
-  //   };
-    
-  // }
-  // download via content link
-  else {
-    try {
-      await ensureScripts(tabId);
-      const filename = mdClipsFolder + generateValidFileName(title, options.disallowedChars) + ".md";
-      const code = `downloadMarkdown("${filename}","${base64EncodeUnicode(markdown)}");`
-      await browser.tabs.executeScript(tabId, {code: code});
-    }
-    catch (error) {
-      // This could happen if the extension is not allowed to run code in
-      // the page, for example if the tab is a privileged page.
-      console.error("Failed to execute script: " + error);
-    };
+  console.log('[convertArticleToMarkdown] downloadImages:', options.downloadImages, 'imageList:', Object.keys(imageList));
+  if (options.downloadImages && options.downloadMode == 'downloadsApi' && !skipPreDownload) {
+    const pre = await preDownloadImages(imageList, markdown, options);
+    markdown = pre.markdown; imageList = pre.imageList;
   }
+  // Appliquer les templates front/back matter uniquement si includeTemplate=true
+  if (options.includeTemplate) {
+    markdown = textReplace(options.frontmatter, article, options.disallowedChars) + markdown + textReplace(options.backmatter, article, options.disallowedChars);
+  }
+  return { markdown, imageList };
 }
 
+// ---- formatter.js ----
+async function formatTitle(article) {
+  let options = await getOptions();
+  let title = textReplace(options.title, article, options.disallowedChars + '/');
+  title = generateValidFileName(title, null, options.maxTitleLength);
+  return title;
+}
+async function formatMdClipsFolder(article) {
+  let options = await getOptions();
+  let mdClipsFolder = '';
+  if (options.downloadMode == 'downloadsApi') {
+    mdClipsFolder = textReplace(options.mdClipsFolder, article, options.disallowedChars + '/');
+    if (mdClipsFolder && !mdClipsFolder.endsWith('/')) mdClipsFolder += '/';
+  }
+  return mdClipsFolder;
+}
+async function formatObsidianFolder(article) {
+  let options = await getOptions();
+  let obsidianFolder = '';
+  if (options.imageStyle.startsWith('obsidian') && options.obsidianFolder) {
+    obsidianFolder = textReplace(options.obsidianFolder, article, options.disallowedChars + '/');
+    if (obsidianFolder && !obsidianFolder.endsWith('/')) obsidianFolder += '/';
+  }
+  return obsidianFolder;
+}
+
+// ---- download-manager.js ----
 function downloadListener(id, url) {
   const self = (delta) => {
     if (delta.id === id && delta.state && delta.state.current == "complete") {
-      // detatch this listener
       browser.downloads.onChanged.removeListener(self);
-      //release the url for the blob
-      URL.revokeObjectURL(url);
+      if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+    }
+  }; return self;
+}
+async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsFolder = '', forceNoImages = false) {
+  const options = await getOptions();
+  if (options.downloadMode == 'downloadsApi' && browser.downloads) {
+    // Forcer le mode dossier : utiliser downloadFolder au lieu de télécharger à plat
+    if (forceNoImages) {
+      // Download MD only : PAS d'inserts images, PAS de téléchargement images
+      const url = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
+      try {
+        if(mdClipsFolder && !mdClipsFolder.endsWith('/')) mdClipsFolder += '/';
+        const cleanedTitle = title.replace(/\.md$/, '').replace(/[^a-zA-Z0-9\-_]/g, '_');
+        const id = await browser.downloads.download({ url, filename: mdClipsFolder + cleanedTitle + ".md", saveAs: options.saveAs });
+        browser.downloads.onChanged.addListener(downloadListener(id, url));
+      } catch (err) { console.error("Download failed", err); }
+    } else {
+      // Download with images : utiliser downloadFolder
+      await downloadFolder(markdown, title, tabId, imageList, mdClipsFolder);
     }
   }
-  return self;
+}
+async function downloadFolder(markdown, title, tabId, imageList = {}, mdClipsFolder = '') {
+  console.log('[downloadFolder] Starting with', Object.keys(imageList).length, 'images');
+  const options = await getOptions();
+
+  // Create folder name from title (cleaned) and truncate to avoid OS path length issues
+  const cleanedTitle = title.replace(/\.md$/, '').replace(/[^a-zA-Z0-9\-_]/g, '_');
+  const folderName = cleanedTitle.substring(0, 80);
+  const folderPath = (mdClipsFolder ? mdClipsFolder : '') + folderName + '/';
+
+  // Download markdown file (using same cleaned name)
+  console.log('[downloadFolder] Creating markdown blob...');
+  const mdUrl = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
+  const mdFilename = folderName + '.md';
+  console.log('[downloadFolder] Starting markdown download to:', folderPath + mdFilename);
+  try {
+    const mdId = await browser.downloads.download({
+      url: mdUrl,
+      filename: folderPath + mdFilename,
+      saveAs: false
+    });
+    console.log('[downloadFolder] Markdown download started:', mdId);
+    setTimeout(() => URL.revokeObjectURL(mdUrl), 60000);
+  } catch (err) {
+    console.error("Markdown download failed", err);
+    URL.revokeObjectURL(mdUrl);
+    return;
+  }
+  await Promise.all(Object.entries(imageList).map(async ([src, filename]) => {
+    console.log('[downloadFolder] Downloading image:', src.substring(0, 50), '->', filename);
+    try {
+      const relPath = filename.split('\\').join('/').replace(/^\//, '');
+      const imgId = await browser.downloads.download({ url: src, filename: folderPath + 'images/' + relPath, saveAs: false });
+      browser.downloads.onChanged.addListener(downloadListener(imgId, src));
+      console.log('[downloadFolder] Image download started:', imgId);
+    } catch (err) { console.error('[downloadFolder] Failed to download image:', src, err); }
+  }));
+  console.log('[downloadFolder] All downloads completed');
+}
+async function downloadZip(markdown, title, tabId, imageList = {}, mdClipsFolder = '') {
+  console.log('[downloadZip] Starting with', Object.keys(imageList).length, 'images');
+  const options = await getOptions();
+  const zipImages = {};
+  for (const [src, filename] of Object.entries(imageList)) {
+    console.log('[downloadZip] Processing image:', src.substring(0, 50), '->', filename);
+    try {
+      const result = await fetchImageAsUint8Array(src);
+      const relPath = filename.split('\\').join('/').replace(/^\//, '');
+      zipImages[relPath] = result;
+    } catch (err) { console.warn('[ZIP] Failed to download image:', src, err.message); }
+  }
+  const zip = new JSZip();
+  const folderName = title.replace(/\.md$/, '').replace(/[^a-zA-Z0-9\-_]/g, '_');
+  const folder = zip.folder(folderName);
+  folder.file(folderName + '.md', markdown);
+  console.log('[downloadZip] zipImages count:', Object.keys(zipImages).length);
+  for (const [relPath, data] of Object.entries(zipImages)) folder.file(relPath, data);
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+  const zipUrl = URL.createObjectURL(zipBlob);
+  try {
+    await browser.downloads.download({ url: zipUrl, filename: (mdClipsFolder ? mdClipsFolder : '') + folderName + '.zip', saveAs: options.saveAs });
+  } catch (err) { console.error("ZIP Download failed", err); URL.revokeObjectURL(zipUrl); throw err; }
+  setTimeout(() => URL.revokeObjectURL(zipUrl), 60000);
 }
 
-function base64EncodeUnicode(str) {
-  // Firstly, escape the string using encodeURIComponent to get the UTF-8 encoding of the characters, 
-  // Secondly, we convert the percent encodings into raw bytes, and add it to btoa() function.
-  const utf8Bytes = encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function (match, p1) {
-    return String.fromCharCode('0x' + p1);
+// ---- article-extractor.js ----
+function extractBetterTitle(dom) {
+  // Priorité 1: OpenGraph title (souvent plus propre que <title>)
+  const ogTitle = dom.head?.querySelector('meta[property="og:title"]')?.content;
+  if (ogTitle && ogTitle.length > 5 && ogTitle.length < 200) {
+    return cleanTitleSuffix(ogTitle, dom);
+  }
+
+  // Priorité 2: Twitter Card title
+  const twitterTitle = dom.head?.querySelector('meta[name="twitter:title"]')?.content;
+  if (twitterTitle && twitterTitle.length > 5 && twitterTitle.length < 200) {
+    return cleanTitleSuffix(twitterTitle, dom);
+  }
+
+  // Priorité 3: <title> HTML avec nettoyage
+  const htmlTitle = dom.title;
+  if (htmlTitle) {
+    return cleanTitleSuffix(htmlTitle, dom);
+  }
+
+  // Fallback: premier h1
+  const h1 = dom.body?.querySelector('h1');
+  if (h1) {
+    return h1.textContent.trim();
+  }
+
+  return "Untitled";
+}
+
+function cleanTitleSuffix(title, dom) {
+  // Nettoyer les suffixes courants
+  const siteName = dom.head?.querySelector('meta[property="og:site_name"]')?.content;
+  const author = dom.head?.querySelector('meta[name="author"]')?.content;
+
+  // Patterns à supprimer
+  const patterns = [
+    /\s*[—|–|-]\s*(?:by\s+)?[^—|–|-]+$/i, // " — by Author" ou " — Site Name"
+    /\s*[—|–|-]\s*$/, // " — " à la fin
+    /\s*\|\s*[^|]+$/, // " | Site Name"
+    /\s*»\s*[^»]+$/, // " » Site Name"
+    new RegExp(`\\s*[—|–|-]\\s*${siteName?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i'), // " — Site Name"
+    new RegExp(`\\s*[—|–|-]\\s*by\\s+${author?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i'), // " — by Author"
+  ];
+
+  let cleaned = title;
+  for (const pattern of patterns) {
+    cleaned = cleaned.replace(pattern, '');
+  }
+
+  return cleaned.trim();
+}
+
+async function getArticleFromDom(domString) {
+  const parser = new DOMParser();
+  const dom = parser.parseFromString(domString, "text/html");
+  if (dom.documentElement.nodeName == "parsererror") console.error("error while parsing");
+  const math = {};
+  const storeMathInfo = (el, mathInfo) => {
+    let randomId = URL.createObjectURL(new Blob([]));
+    randomId = randomId.substring(randomId.length - 36);
+    el.id = randomId; math[randomId] = mathInfo;
+  };
+  dom.body.querySelectorAll('script[id^=MathJax-Element-]')?.forEach(mathSource => {
+    const type = mathSource.attributes.type.value;
+    storeMathInfo(mathSource, { tex: mathSource.innerText, inline: type ? !type.includes('mode=display') : false });
   });
-
-  return btoa(utf8Bytes);
+  dom.body.querySelectorAll('[markdownload-latex]')?.forEach(mathJax3Node =>  {
+    const tex = mathJax3Node.getAttribute('markdownload-latex');
+    const display = mathJax3Node.getAttribute('display');
+    const inline = !(display && display === 'true');
+    const mathNode = document.createElement(inline ? "i" : "p");
+    mathNode.textContent = tex;
+    mathJax3Node.parentNode.insertBefore(mathNode, mathJax3Node.nextSibling);
+    mathJax3Node.parentNode.removeChild(mathJax3Node);
+    storeMathInfo(mathNode, { tex, inline });
+  });
+  dom.body.querySelectorAll('.katex-mathml')?.forEach(kaTeXNode => {
+    storeMathInfo(kaTeXNode, { tex: kaTeXNode.querySelector('annotation').textContent, inline: true });
+  });
+  dom.body.querySelectorAll('[class*=highlight-text],[class*=highlight-source]')?.forEach(codeSource => {
+    const language = codeSource.className.match(/highlight-(?:text|source)-([a-z0-9]+)/)?.[1];
+    if (codeSource.firstChild.nodeName == "PRE") codeSource.firstChild.id = `code-lang-${language}`;
+  });
+  dom.body.querySelectorAll('[class*=language-]')?.forEach(codeSource => {
+    const language = codeSource.className.match(/language-([a-z0-9]+)/)?.[1];
+    codeSource.id = `code-lang-${language}`;
+  });
+  dom.body.querySelectorAll('pre br')?.forEach(br => { br.outerHTML = '<br-keep></br-keep>'; });
+  dom.body.querySelectorAll('.codehilite > pre')?.forEach(codeSource => {
+    if (codeSource.firstChild.nodeName !== 'CODE' && !codeSource.className.includes('language')) codeSource.id = `code-lang-text`;
+  });
+  dom.body.querySelectorAll('h1, h2, h3, h4, h5, h6')?.forEach(header => { header.className = ''; header.outerHTML = header.outerHTML; });
+  dom.documentElement.removeAttribute('class');
+  const article = new Readability(dom).parse();
+  article.baseURI = dom.baseURI; article.pageTitle = extractBetterTitle(dom);
+  const url = new URL(dom.baseURI);
+  Object.assign(article, { hash: url.hash, host: url.host, origin: url.origin, hostname: url.hostname, pathname: url.pathname, port: url.port, protocol: url.protocol, search: url.search });
+  if (dom.head) {
+    article.keywords = dom.head.querySelector('meta[name="keywords"]')?.content?.split(',')?.map(s => s.trim());
+    dom.head.querySelectorAll('meta[name][content], meta[property][content]')?.forEach(meta => {
+      const key = (meta.getAttribute('name') || meta.getAttribute('property'));
+      const val = meta.getAttribute('content');
+      if (key && val && !article[key]) article[key] = val;
+    });
+  }
+  article.math = math; return article;
+}
+async function getArticleFromContent(tabId, selection = false) {
+  const results = await browser.tabs.executeScript(tabId, { code: "getSelectionAndDom()" });
+  if (results && results[0] && results[0].dom) {
+    const article = await getArticleFromDom(results[0].dom, selection);
+    if (selection && results[0].selection) article.content = results[0].selection;
+    return article;
+  } else return null;
 }
 
-//function that handles messages from the injected script into the site
+// ---- menu-manager.js ----
+async function toggleSetting(setting, options = null) {
+  if (options == null) options = await getOptions();
+  options[setting] = !options[setting];
+  await browser.storage.local.set({ options: options });
+  if (setting == "obsidianIntegration") await createMenus();
+  return options;
+}
+async function ensureScripts(tabId) {
+  const results = await browser.tabs.executeScript(tabId, { code: "typeof getSelectionAndDom === 'function';" });
+  if (!results || !results[0]) await browser.tabs.executeScript(tabId, { file: "content/content.js" });
+}
+async function createMenus() {
+  const options = await getOptions();
+
+  browser.contextMenus.removeAll();
+
+  if (options.contextMenus) {
+
+    // tab menu (chrome does not support this)
+    try {
+      browser.contextMenus.create({
+        id: "download-markdown-tab",
+        title: "Download Tab as Markdown",
+        contexts: ["tab"]
+      }, () => { });
+
+      browser.contextMenus.create({
+        id: "tab-download-markdown-alltabs",
+        title: "Download All Tabs as Markdown",
+        contexts: ["tab"]
+      }, () => { });
+
+      browser.contextMenus.create({
+        id: "copy-tab-as-markdown-link-tab",
+        title: "Copy Tab URL as Markdown Link",
+        contexts: ["tab"]
+      }, () => { });
+
+      browser.contextMenus.create({
+        id: "copy-tab-as-markdown-link-all-tab",
+        title: "Copy All Tab URLs as Markdown Link List",
+        contexts: ["tab"]
+      }, () => { });
+
+      browser.contextMenus.create({
+        id: "copy-tab-as-markdown-link-selected-tab",
+        title: "Copy Selected Tab URLs as Markdown Link List",
+        contexts: ["tab"]
+      }, () => { });
+
+      browser.contextMenus.create({
+        id: "tab-separator-1",
+        type: "separator",
+        contexts: ["tab"]
+      }, () => { });
+
+      browser.contextMenus.create({
+        id: "tabtoggle-includeTemplate",
+        type: "checkbox",
+        title: "Include front/back template",
+        contexts: ["tab"],
+        checked: options.includeTemplate
+      }, () => { });
+
+      browser.contextMenus.create({
+        id: "tabtoggle-downloadImages",
+        type: "checkbox",
+        title: "Download Images",
+        contexts: ["tab"],
+        checked: options.downloadImages
+      }, () => { });
+    } catch {
+
+    }
+    // add the download all tabs option to the page context menu as well
+    browser.contextMenus.create({
+      id: "download-markdown-alltabs",
+      title: "Download All Tabs as Markdown",
+      contexts: ["all"]
+    }, () => { });
+    browser.contextMenus.create({
+      id: "separator-0",
+      type: "separator",
+      contexts: ["all"]
+    }, () => { });
+
+    // download actions
+    browser.contextMenus.create({
+      id: "download-markdown-selection",
+      title: "Download Selection As Markdown",
+      contexts: ["selection"]
+    }, () => { });
+    browser.contextMenus.create({
+      id: "download-markdown-all",
+      title: "Download Tab As Markdown",
+      contexts: ["all"]
+    }, () => { });
+
+    browser.contextMenus.create({
+      id: "separator-1",
+      type: "separator",
+      contexts: ["all"]
+    }, () => { });
+
+    // copy to clipboard actions
+    browser.contextMenus.create({
+      id: "copy-markdown-selection",
+      title: "Copy Selection As Markdown",
+      contexts: ["selection"]
+    }, () => { });
+    browser.contextMenus.create({
+      id: "copy-markdown-link",
+      title: "Copy Link As Markdown",
+      contexts: ["link"]
+    }, () => { });
+    browser.contextMenus.create({
+      id: "copy-markdown-image",
+      title: "Copy Image As Markdown",
+      contexts: ["image"]
+    }, () => { });
+    browser.contextMenus.create({
+      id: "copy-markdown-all",
+      title: "Copy Tab As Markdown",
+      contexts: ["all"]
+    }, () => { });
+    browser.contextMenus.create({
+      id: "copy-tab-as-markdown-link",
+      title: "Copy Tab URL as Markdown Link",
+      contexts: ["all"]
+    }, () => { });
+    browser.contextMenus.create({
+      id: "copy-tab-as-markdown-link-all",
+      title: "Copy All Tab URLs as Markdown Link List",
+      contexts: ["all"]
+    }, () => { });
+    browser.contextMenus.create({
+      id: "copy-tab-as-markdown-link-selected",
+      title: "Copy Selected Tab URLs as Markdown Link List",
+      contexts: ["all"]
+    }, () => { });
+
+    browser.contextMenus.create({
+      id: "separator-2",
+      type: "separator",
+      contexts: ["all"]
+    }, () => { });
+
+    if(options.obsidianIntegration){
+      // copy to clipboard actions
+      browser.contextMenus.create({
+        id: "copy-markdown-obsidian",
+        title: "Send Text selection to Obsidian",
+        contexts: ["selection"]
+      }, () => { });
+      browser.contextMenus.create({
+        id: "copy-markdown-obsall",
+        title: "Send Tab to Obsidian",
+        contexts: ["all"]
+      }, () => { });
+    }
+    browser.contextMenus.create({
+      id: "separator-3",
+      type: "separator",
+      contexts: ["all"]
+    }, () => { });
+
+    // options
+    browser.contextMenus.create({
+      id: "toggle-includeTemplate",
+      type: "checkbox",
+      title: "Include front/back template",
+      contexts: ["all"],
+      checked: options.includeTemplate
+    }, () => { });
+
+    browser.contextMenus.create({
+      id: "toggle-downloadImages",
+      type: "checkbox",
+      title: "Download Images",
+      contexts: ["all"],
+      checked: options.downloadImages
+    }, () => { });
+  }
+}
+
+// ---- MAIN (background-new.js without imports) ----
+// log some info
+browser.runtime.getPlatformInfo().then(async platformInfo => {
+  const browserInfo = browser.runtime.getBrowserInfo ? await browser.runtime.getBrowserInfo() : "Can't get browser info";
+  console.info(platformInfo, browserInfo);
+});
+
+browser.runtime.onMessage.addListener(notify);
+createMenus();
+TurndownService.prototype.defaultEscape = TurndownService.prototype.escape;
+
 async function notify(message) {
   const options = await this.getOptions();
-  // message for initial clipping of the dom
   if (message.type == "clip") {
-    // get the article info from the passed in dom
     const article = await getArticleFromDom(message.dom);
-
-    // if selection info was passed in (and we're to clip the selection)
-    // replace the article content
-    if (message.selection && message.clipSelection) {
-      article.content = message.selection;
-    }
-    
-    // convert the article to markdown
-    const { markdown, imageList } = await convertArticleToMarkdown(article);
-
-    // format the title
+    if (message.selection && message.clipSelection) article.content = message.selection;
+    // Affichage dans le popup : PAS d'inserts images (includeImageLinks=false)
+    const { markdown, imageList } = await convertArticleToMarkdown(article, false, false, false);
     article.title = await formatTitle(article);
-
-    // format the mdClipsFolder
     const mdClipsFolder = await formatMdClipsFolder(article);
-
-    // display the data in the popup
-    await browser.runtime.sendMessage({ type: "display.md", markdown: markdown, article: article, imageList: imageList, mdClipsFolder: mdClipsFolder});
+    await browser.runtime.sendMessage({ type: "display.md", markdown, article, imageList, mdClipsFolder});
   }
-  // message for triggering download
   else if (message.type == "download") {
-    downloadMarkdown(message.markdown, message.title, message.tab.id, message.imageList, message.mdClipsFolder);
+    // Download MD only : PAS d'inserts images
+    // S'assurer que le titre est formaté avec maxTitleLength
+    const formattedTitle = generateValidFileName(message.title, null, message.options?.maxTitleLength || 100);
+    downloadMarkdown(message.markdown, formattedTitle, message.tab.id, {}, message.mdClipsFolder, true);
+  }
+  else if (message.type == "downloadZip") {
+    console.log('[notify downloadZip] clipSelection:', message.clipSelection);
+    await ensureScripts(message.tab.id);
+    const article = await getArticleFromContent(message.tab.id, message.clipSelection);
+    if (article) {
+      // Download with images : AVEC inserts images (includeImageLinks=true)
+      const { markdown, imageList } = await convertArticleToMarkdown(article, true, true, true);
+      console.log('[notify downloadZip] Got imageList with', Object.keys(imageList).length, 'images');
+      const title = await formatTitle(article);
+      const mdClipsFolder = await formatMdClipsFolder(article);
+      await downloadFolder(markdown, title, message.tab.id, imageList, mdClipsFolder);
+    }
   }
 }
 
 browser.commands.onCommand.addListener(function (command) {
-  const tab = browser.tabs.getCurrent()
+  const tab = browser.tabs.getCurrent();
   if (command == "download_tab_as_markdown") {
     const info = { menuItemId: "download-markdown-all" };
     downloadMarkdownFromContext(info, tab);
@@ -594,353 +824,55 @@ browser.commands.onCommand.addListener(function (command) {
   }
 });
 
-// click handler for the context menus
 browser.contextMenus.onClicked.addListener(function (info, tab) {
-  // one of the copy to clipboard commands
-  if (info.menuItemId.startsWith("copy-markdown")) {
-    copyMarkdownFromContext(info, tab);
-  }
-  else if (info.menuItemId == "download-markdown-alltabs" || info.menuItemId == "tab-download-markdown-alltabs") {
-    downloadMarkdownForAllTabs(info);
-  }
-  // one of the download commands
-  else if (info.menuItemId.startsWith("download-markdown")) {
-    downloadMarkdownFromContext(info, tab);
-  }
-  // copy tab as markdown link
-  else if (info.menuItemId.startsWith("copy-tab-as-markdown-link-all")) {
-    copyTabAsMarkdownLinkAll(tab);
-  }
-  // copy only selected tab as markdown link
-  else if (info.menuItemId.startsWith("copy-tab-as-markdown-link-selected")) {
-    copySelectedTabAsMarkdownLink(tab);
-  }
-  else if (info.menuItemId.startsWith("copy-tab-as-markdown-link")) {
-    copyTabAsMarkdownLink(tab);
-  }
-  // a settings toggle command
-  else if (info.menuItemId.startsWith("toggle-") || info.menuItemId.startsWith("tabtoggle-")) {
-    toggleSetting(info.menuItemId.split('-')[1]);
-  }
+  if (info.menuItemId.startsWith("copy-markdown")) copyMarkdownFromContext(info, tab);
+  else if (info.menuItemId.startsWith("download-markdown")) downloadMarkdownFromContext(info, tab);
 });
 
-// this function toggles the specified option
-async function toggleSetting(setting, options = null) {
-  // if there's no options object passed in, we need to go get one
-  if (options == null) {
-      // get the options from storage and toggle the setting
-      await toggleSetting(setting, await getOptions());
-  }
-  else {
-    // toggle the option and save back to storage
-    options[setting] = !options[setting];
-    await browser.storage.sync.set(options);
-    if (setting == "includeTemplate") {
-      browser.contextMenus.update("toggle-includeTemplate", {
-        checked: options.includeTemplate
-      });
-      try {
-        browser.contextMenus.update("tabtoggle-includeTemplate", {
-          checked: options.includeTemplate
-        });
-      } catch { }
-    }
-    
-    if (setting == "downloadImages") {
-      browser.contextMenus.update("toggle-downloadImages", {
-        checked: options.downloadImages
-      });
-      try {
-        browser.contextMenus.update("tabtoggle-downloadImages", {
-          checked: options.downloadImages
-        });
-      } catch { }
-    }
-  }
-}
-
-// this function ensures the content script is loaded (and loads it if it isn't)
-async function ensureScripts(tabId) {
-  const results = await browser.tabs.executeScript(tabId, { code: "typeof getSelectionAndDom === 'function';" })
-  // The content script's last expression will be true if the function
-  // has been defined. If this is not the case, then we need to run
-  // pageScraper.js to define function getSelectionAndDom.
-  if (!results || results[0] !== true) {
-    await browser.tabs.executeScript(tabId, {file: "/contentScript/contentScript.js"});
-  }
-}
-
-// get Readability article info from the dom passed in
-async function getArticleFromDom(domString) {
-  // parse the dom
-  const parser = new DOMParser();
-  const dom = parser.parseFromString(domString, "text/html");
-
-  if (dom.documentElement.nodeName == "parsererror") {
-    console.error("error while parsing");
-  }
-
-  const math = {};
-
-  const storeMathInfo = (el, mathInfo) => {
-    let randomId = URL.createObjectURL(new Blob([]));
-    randomId = randomId.substring(randomId.length - 36);
-    el.id = randomId;
-    math[randomId] = mathInfo;
-  };
-
-  dom.body.querySelectorAll('script[id^=MathJax-Element-]')?.forEach(mathSource => {
-    const type = mathSource.attributes.type.value
-    storeMathInfo(mathSource, {
-      tex: mathSource.innerText,
-      inline: type ? !type.includes('mode=display') : false
-    });
-  });
-
-  dom.body.querySelectorAll('[markdownload-latex]')?.forEach(mathJax3Node =>  {
-    const tex = mathJax3Node.getAttribute('markdownload-latex')
-    const display = mathJax3Node.getAttribute('display')
-    const inline = !(display && display === 'true')
-
-    const mathNode = document.createElement(inline ? "i" : "p")
-    mathNode.textContent = tex;
-    mathJax3Node.parentNode.insertBefore(mathNode, mathJax3Node.nextSibling)
-    mathJax3Node.parentNode.removeChild(mathJax3Node)
-
-    storeMathInfo(mathNode, {
-      tex: tex,
-      inline: inline
-    });
-  });
-
-  dom.body.querySelectorAll('.katex-mathml')?.forEach(kaTeXNode => {
-    storeMathInfo(kaTeXNode, {
-      tex: kaTeXNode.querySelector('annotation').textContent,
-      inline: true
-    });
-  });
-
-  dom.body.querySelectorAll('[class*=highlight-text],[class*=highlight-source]')?.forEach(codeSource => {
-    const language = codeSource.className.match(/highlight-(?:text|source)-([a-z0-9]+)/)?.[1]
-    if (codeSource.firstChild.nodeName == "PRE") {
-      codeSource.firstChild.id = `code-lang-${language}`
-    }
-  });
-
-  dom.body.querySelectorAll('[class*=language-]')?.forEach(codeSource => {
-    const language = codeSource.className.match(/language-([a-z0-9]+)/)?.[1]
-    codeSource.id = `code-lang-${language}`;
-  });
-
-  dom.body.querySelectorAll('pre br')?.forEach(br => {
-    // we need to keep <br> tags because they are removed by Readability.js
-    br.outerHTML = '<br-keep></br-keep>';
-  });
-
-  dom.body.querySelectorAll('.codehilite > pre')?.forEach(codeSource => {
-    if (codeSource.firstChild.nodeName !== 'CODE' && !codeSource.className.includes('language')) {
-      codeSource.id = `code-lang-text`;
-    }
-  });
-
-  dom.body.querySelectorAll('h1, h2, h3, h4, h5, h6')?.forEach(header => {
-    // Readability.js will strip out headings from the dom if certain words appear in their className
-    // See: https://github.com/mozilla/readability/issues/807  
-    header.className = '';
-    header.outerHTML = header.outerHTML;  
-  });
-
-  // Prevent Readability from removing the <html> element if has a 'class' attribute
-  // which matches removal criteria.
-  // Note: The document element is guaranteed to be the HTML tag because the 'text/html'
-  // mime type was used when the DOM was created.
-  dom.documentElement.removeAttribute('class')
-
-  // simplify the dom into an article
-  const article = new Readability(dom).parse();
-
-  // get the base uri from the dom and attach it as important article info
-  article.baseURI = dom.baseURI;
-  // also grab the page title
-  article.pageTitle = dom.title;
-  // and some URL info
-  const url = new URL(dom.baseURI);
-  article.hash = url.hash;
-  article.host = url.host;
-  article.origin = url.origin;
-  article.hostname = url.hostname;
-  article.pathname = url.pathname;
-  article.port = url.port;
-  article.protocol = url.protocol;
-  article.search = url.search;
-  
-
-  // make sure the dom has a head
-  if (dom.head) {
-    // and the keywords, should they exist, as an array
-    article.keywords = dom.head.querySelector('meta[name="keywords"]')?.content?.split(',')?.map(s => s.trim());
-
-    // add all meta tags, so users can do whatever they want
-    dom.head.querySelectorAll('meta[name][content], meta[property][content]')?.forEach(meta => {
-      const key = (meta.getAttribute('name') || meta.getAttribute('property'))
-      const val = meta.getAttribute('content')
-      if (key && val && !article[key]) {
-        article[key] = val;
-      }
-    })
-  }
-
-  article.math = math
-
-  // return the article
-  return article;
-}
-
-// get Readability article info from the content of the tab id passed in
-// `selection` is a bool indicating whether we should just get the selected text
-async function getArticleFromContent(tabId, selection = false) {
-  // run the content script function to get the details
-  const results = await browser.tabs.executeScript(tabId, { code: "getSelectionAndDom()" });
-
-  // make sure we actually got a valid result
-  if (results && results[0] && results[0].dom) {
-    const article = await getArticleFromDom(results[0].dom, selection);
-
-    // if we're to grab the selection, and we've selected something,
-    // replace the article content with the selection
-    if (selection && results[0].selection) {
-      article.content = results[0].selection;
-    }
-
-    //return the article
-    return article;
-  }
-  else return null;
-}
-
-// function to apply the title template
-async function formatTitle(article) {
-  let options = await getOptions();
-  
-  let title = textReplace(options.title, article, options.disallowedChars + '/');
-  title = title.split('/').map(s=>generateValidFileName(s, options.disallowedChars)).join('/');
-  return title;
-}
-
-async function formatMdClipsFolder(article) {
-  let options = await getOptions();
-
-  let mdClipsFolder = '';
-  if (options.mdClipsFolder && options.downloadMode == 'downloadsApi') {
-    mdClipsFolder = textReplace(options.mdClipsFolder, article, options.disallowedChars);
-    mdClipsFolder = mdClipsFolder.split('/').map(s => generateValidFileName(s, options.disallowedChars)).join('/');
-    if (!mdClipsFolder.endsWith('/')) mdClipsFolder += '/';
-  }
-
-  return mdClipsFolder;
-}
-
-async function formatObsidianFolder(article) {
-  let options = await getOptions();
-
-  let obsidianFolder = '';
-  if (options.obsidianFolder) {
-    obsidianFolder = textReplace(options.obsidianFolder, article, options.disallowedChars);
-    obsidianFolder = obsidianFolder.split('/').map(s => generateValidFileName(s, options.disallowedChars)).join('/');
-    if (!obsidianFolder.endsWith('/')) obsidianFolder += '/';
-  }
-
-  return obsidianFolder;
-}
-
-// function to download markdown, triggered by context menu
 async function downloadMarkdownFromContext(info, tab) {
   await ensureScripts(tab.id);
   const article = await getArticleFromContent(tab.id, info.menuItemId == "download-markdown-selection");
   const title = await formatTitle(article);
-  const { markdown, imageList } = await convertArticleToMarkdown(article);
-  // format the mdClipsFolder
   const mdClipsFolder = await formatMdClipsFolder(article);
-  await downloadMarkdown(markdown, title, tab.id, imageList, mdClipsFolder); 
-
+  // Par défaut, PAS d'inserts images (includeImageLinks=false)
+  const { markdown, imageList } = await convertArticleToMarkdown(article, false, false, false);
+  // Forcer le mode dossier pour tous les téléchargements
+  await downloadFolder(markdown, title, tab.id, imageList, mdClipsFolder);
 }
-
-// function to copy a tab url as a markdown link
 async function copyTabAsMarkdownLink(tab) {
   try {
     await ensureScripts(tab.id);
     const article = await getArticleFromContent(tab.id);
-    const title = await formatTitle(article);
-    await browser.tabs.executeScript(tab.id, { code: `copyToClipboard("[${title}](${article.baseURI})")` });
-    // await navigator.clipboard.writeText(`[${title}](${article.baseURI})`);
+    const options = await getOptions();
+    const { markdown } = setupTurndown(`<a href="${article.baseURI}">${article.title}</a>`, { ...options, downloadImages: false }, article);
+    await browser.tabs.executeScript(tab.id, {code: `copyToClipboard(${JSON.stringify(markdown)})`});
   }
-  catch (error) {
-    // This could happen if the extension is not allowed to run code in
-    // the page, for example if the tab is a privileged page.
-    console.error("Failed to copy as markdown link: " + error);
-  };
+  catch (error) { console.error("Failed to copy text: " + error); }
 }
-
-// function to copy all tabs as markdown links
 async function copyTabAsMarkdownLinkAll(tab) {
   try {
     const options = await getOptions();
     options.frontmatter = options.backmatter = '';
-    const tabs = await browser.tabs.query({
-      currentWindow: true
-    });
-    
-    const links = [];
-    for(const tab of tabs) {
-      await ensureScripts(tab.id);
-      const article = await getArticleFromContent(tab.id);
-      const title = await formatTitle(article);
-      const link = `${options.bulletListMarker} [${title}](${article.baseURI})`
-      links.push(link)
-    };
-    
-    const markdown = links.join(`\n`)
-    await browser.tabs.executeScript(tab.id, { code: `copyToClipboard(${JSON.stringify(markdown)})` });
-
+    const tabs = await browser.tabs.query({ currentWindow: true });
+    let markdown = options.frontmatter;
+    tabs.forEach(t => { markdown += `- [${t.title}](${t.url})\n`; });
+    markdown += options.backmatter;
+    await browser.tabs.executeScript(tab.id, {code: `copyToClipboard(${JSON.stringify(markdown)})`});
   }
-  catch (error) {
-    // This could happen if the extension is not allowed to run code in
-    // the page, for example if the tab is a privileged page.
-    console.error("Failed to copy as markdown link: " + error);
-  };
+  catch (error) { console.error("Failed to copy text: " + error); }
 }
-
-// function to copy only selected tabs as markdown links
 async function copySelectedTabAsMarkdownLink(tab) {
   try {
     const options = await getOptions();
     options.frontmatter = options.backmatter = '';
-    const tabs = await browser.tabs.query({
-      currentWindow: true,
-      highlighted: true
-    });
-
-    const links = [];
-    for (const tab of tabs) {
-      await ensureScripts(tab.id);
-      const article = await getArticleFromContent(tab.id);
-      const title = await formatTitle(article);
-      const link = `${options.bulletListMarker} [${title}](${article.baseURI})`
-      links.push(link)
-    };
-
-    const markdown = links.join(`\n`)
-    await browser.tabs.executeScript(tab.id, { code: `copyToClipboard(${JSON.stringify(markdown)})` });
-
+    const tabs = await browser.tabs.query({ currentWindow: true, highlighted: true });
+    let markdown = options.frontmatter;
+    tabs.forEach(t => { markdown += `- [${t.title}](${t.url})\n`; });
+    markdown += options.backmatter;
+    await browser.tabs.executeScript(tab.id, {code: `copyToClipboard(${JSON.stringify(markdown)})`});
   }
-  catch (error) {
-    // This could happen if the extension is not allowed to run code in
-    // the page, for example if the tab is a privileged page.
-    console.error("Failed to copy as markdown link: " + error);
-  };
+  catch (error) { console.error("Failed to copy text: " + error); }
 }
-
-// function to copy markdown to the clipboard, triggered by context menu
 async function copyMarkdownFromContext(info, tab) {
   try{
     await ensureScripts(tab.id);
@@ -957,7 +889,7 @@ async function copyMarkdownFromContext(info, tab) {
       const options = await getOptions();
       options.frontmatter = options.backmatter = '';
       const article = await getArticleFromContent(tab.id, false);
-      const { markdown } = turndown(`<a href="${info.linkUrl}">${info.linkText || info.selectionText}</a>`, { ...options, downloadImages: false }, article);
+      const { markdown } = setupTurndown(`<a href="${info.linkUrl}">${info.linkText || info.selectionText}</a>`, { ...options, downloadImages: false }, article);
       await browser.tabs.executeScript(tab.id, {code: `copyToClipboard(${JSON.stringify(markdown)})`});
     }
     else if (info.menuItemId == "copy-markdown-image") {
@@ -969,7 +901,8 @@ async function copyMarkdownFromContext(info, tab) {
       const options = await getOptions();
       const obsidianVault = options.obsidianVault;
       const obsidianFolder = await formatObsidianFolder(article);
-      const { markdown } = await convertArticleToMarkdown(article, downloadImages = false);
+      // PAS d'inserts images pour copy (includeImageLinks=false)
+      const { markdown } = await convertArticleToMarkdown(article, false, false, false);
       await browser.tabs.executeScript(tab.id, { code: `copyToClipboard(${JSON.stringify(markdown)})` });
       await chrome.tabs.update({url: "obsidian://advanced-uri?vault=" + obsidianVault + "&clipboard=true&mode=new&filepath=" + obsidianFolder + generateValidFileName(title)});
     }
@@ -979,48 +912,23 @@ async function copyMarkdownFromContext(info, tab) {
       const options = await getOptions();
       const obsidianVault = options.obsidianVault;
       const obsidianFolder = await formatObsidianFolder(article);
-      const { markdown } = await convertArticleToMarkdown(article, downloadImages = false);
+      // PAS d'inserts images pour copy (includeImageLinks=false)
+      const { markdown } = await convertArticleToMarkdown(article, false, false, false);
       await browser.tabs.executeScript(tab.id, { code: `copyToClipboard(${JSON.stringify(markdown)})` });
-      await browser.tabs.update({url: "obsidian://advanced-uri?vault=" + obsidianVault + "&clipboard=true&mode=new&filepath=" + obsidianFolder + generateValidFileName(title)});
+      await chrome.tabs.update({url: "obsidian://advanced-uri?vault=" + obsidianVault + "&clipboard=true&mode=new&filepath=" + obsidianFolder + generateValidFileName(title)});
     }
     else {
       const article = await getArticleFromContent(tab.id, info.menuItemId == "copy-markdown-selection");
-      const { markdown } = await convertArticleToMarkdown(article, downloadImages = false);
+      // PAS d'inserts images pour copy (includeImageLinks=false)
+      const { markdown } = await convertArticleToMarkdown(article, false, false, false);
       await browser.tabs.executeScript(tab.id, { code: `copyToClipboard(${JSON.stringify(markdown)})` });
     }
   }
   catch (error) {
-    // This could happen if the extension is not allowed to run code in
-    // the page, for example if the tab is a privileged page.
     console.error("Failed to copy text: " + error);
   };
 }
-
 async function downloadMarkdownForAllTabs(info) {
-  const tabs = await browser.tabs.query({
-    currentWindow: true
-  });
-  tabs.forEach(tab => {
-    downloadMarkdownFromContext(info, tab);
-  });
-}
-
-/**
- * String.prototype.replaceAll() polyfill
- * https://gomakethings.com/how-to-replace-a-section-of-a-string-with-another-one-with-vanilla-js/
- * @author Chris Ferdinandi
- * @license MIT
- */
-if (!String.prototype.replaceAll) {
-	String.prototype.replaceAll = function(str, newStr){
-
-		// If a regex pattern
-		if (Object.prototype.toString.call(str).toLowerCase() === '[object regexp]') {
-			return this.replace(str, newStr);
-		}
-
-		// If a string
-		return this.replace(new RegExp(str, 'g'), newStr);
-
-	};
+  const tabs = await browser.tabs.query({ currentWindow: true });
+  tabs.forEach(tab => { downloadMarkdownFromContext(info, tab); });
 }

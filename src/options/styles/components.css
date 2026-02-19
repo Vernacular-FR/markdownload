@@ -1,0 +1,524 @@
+/* Options Components - simplified and standardized */
+
+/* Import design tokens */
+@import url('./variables.css');
+
+/* === DETAILS/SUMMARY === */
+details {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--border-radius-md);
+  margin-bottom: var(--spacing-md);
+  overflow: hidden;
+}
+
+/* When details is inside a card, soften chrome */
+.form-card details {
+  border: none;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+}
+
+summary {
+  margin: 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  cursor: pointer;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  justify-content: flex-start;
+  user-select: none;
+  transition: background var(--transition-fast);
+  list-style: none;
+  min-height: 0;
+}
+
+summary::-webkit-details-marker { display: none; }
+
+.summary-title {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  line-height: var(--line-height-base);
+}
+
+.summary-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-primary);
+}
+
+.summary-icon svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.summary-icon svg { transition: transform var(--transition-fast); }
+.summary-arrow svg { transition: transform var(--transition-fast); }
+
+summary:hover { background: var(--color-primary); }
+
+/* Inside card: keep summary minimal */
+.form-card summary {
+  padding: 0;
+  background: transparent;
+  transition: color var(--transition-fast);
+}
+
+.form-card summary:hover { background: transparent; color: var(--color-text-primary); }
+
+details[open] summary { border-bottom: 1px solid var(--color-border); }
+
+details[open] .summary-icon svg { transform: rotate(180deg); }
+details[open] .summary-arrow svg { transform: rotate(180deg); }
+
+/* Instructions */
+.instructions {
+  padding: var(--spacing-lg);
+  background: var(--color-background-secondary);
+  border-top: 1px solid var(--color-border);
+  display: block;
+}
+
+.instructions ul {
+  margin: var(--spacing-sm) 0;
+  padding-left: 20px;
+}
+.instructions li { margin: var(--spacing-xs) 0; line-height: var(--line-height-base); }
+
+/* === TABS === */
+.tabs {
+  display: flex;
+  gap: 0;
+  margin: 0;
+  border-bottom: 0;
+  background: transparent;
+  align-items: flex-end;
+}
+
+.tab-button {
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  border-radius: var(--border-radius-md) var(--border-radius-md) 0 0;
+  padding: var(--spacing-sm) var(--spacing-lg);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  position: relative;
+  margin-bottom: -1px;
+}
+
+.tab-button:hover {
+  background: var(--color-primary);
+  border-color: var(--color-border);
+}
+.tab-button.active {
+  background: transparent;
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+  border-bottom-color: transparent;
+}
+
+/* === TAB PANELS === */
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  width: 100%;
+  background: transparent;
+  padding: var(--spacing-md);
+  border: 1px solid var(--color-border);
+  border-radius: 0 0 var(--border-radius-md) var(--border-radius-md);
+  box-sizing: border-box;
+}
+
+.tab-panel[hidden] { display: none !important; }
+
+.tab-panel > * { min-width: 0; }
+
+.tab-panel h2,
+.tab-panel h3 {
+  margin: 0;
+}
+
+/* Neutral card container for mixed content (heading + text + inputs) */
+.form-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: var(--color-background-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-md);
+  box-sizing: border-box;
+}
+
+.form-card--flush {
+  padding: 0;
+  border: none;
+  background: transparent;
+  gap: 0;
+}
+
+.section-description {
+  margin: 0;
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+  color: var(--color-text-secondary);
+}
+
+.form-card .checkbox-container,
+.form-card .radio-container,
+.form-card .textbox-container,
+.form-card .button-container {
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+/* Stack helpers for nested groups (shown/hidden sections) */
+#downloadModeGroup,
+#imagePrefix,
+#mdClipsFolder,
+#imageRefOptions {
+  display: grid;
+  gap: var(--spacing-md);
+}
+
+/* === FORM CONTAINERS === */
+.radio-container, .checkbox-container, .button-container, .textbox-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-md);
+  margin: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.radio-container {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  gap: var(--spacing-sm);
+}
+
+.radio-container > h3,
+.radio-container > p,
+.checkbox-container > h3,
+.checkbox-container > p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+/* === RADIO/CHECKBOX LABELS === */
+.radio-container > label,
+.checkbox-container > label {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-background-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-weight: 500;
+  line-height: var(--line-height-base);
+  width: 100%;
+  align-self: stretch;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+
+.radio-container > label:hover,
+.checkbox-container > label:hover {
+  background: var(--color-primary-hover);
+  border-color: var(--color-border);
+}
+
+/* Hide native inputs */
+.radio-container > input[type="radio"],
+.checkbox-container > input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Custom indicators */
+.radio-container > label::before,
+.checkbox-container > label::before {
+  content: '';
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-text-secondary);
+  border-radius: 50%;
+  transition: all var(--transition-fast);
+  align-self: center;
+  flex-shrink: 0;
+}
+
+.radio-container > label > pre,
+.checkbox-container > label > pre,
+.radio-container > label > p,
+.checkbox-container > label > p {
+  margin: 0;
+  line-height: var(--line-height-base);
+  align-self: center;
+}
+
+/* Center label text vertically even when it wraps */
+.radio-container > label > span,
+.checkbox-container > label > span,
+.radio-container > label > p,
+.checkbox-container > label > p {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  background: var(--color-inline);
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-xs) var(--spacing-sm);
+}
+
+.radio-container > label pre,
+.checkbox-container > label pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 100%;
+  overflow: auto;
+}
+
+/* Image style groups: keep title + code block stacked within each tile */
+#imageOptionsWith > label,
+#imageOptionsWithout > label,
+#imageRefOptions > label {
+  grid-template-columns: 18px 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+}
+
+#imageOptionsWith > label::before,
+#imageOptionsWithout > label::before,
+#imageRefOptions > label::before {
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
+#imageOptionsWith > label > pre,
+#imageOptionsWithout > label > pre,
+#imageRefOptions > label > pre {
+  grid-column: 2;
+  grid-row: 2;
+  margin-top: 0;
+}
+
+/* Standardize code blocks inside all option tiles */
+.radio-container > label > pre,
+.checkbox-container > label > pre {
+  background: var(--color-inline);
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  margin-top: 0;
+  align-self: center;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  color: var(--color-text-primary);
+}
+
+/* Inputs inside option tiles share the same inline-block aesthetic */
+.radio-container > label input[type="text"],
+.checkbox-container > label input[type="text"],
+.radio-container > label textarea,
+.checkbox-container > label textarea {
+  width: 100%;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--color-inline);
+  border-radius: var(--border-radius-md);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+  align-self: center;
+}
+
+/* Inline code style (e.g., {title}) */
+code {
+  background: var(--color-inline);
+  color: var(--color-text-primary);
+  padding: 2px 6px;
+  border-radius: var(--border-radius-sm);
+}
+
+/* Avoid double styling for code inside pre blocks */
+pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.checkbox-container > label::before { border-radius: var(--border-radius-sm); }
+
+.radio-container > input[type="radio"]:checked + label::before,
+.checkbox-container > input[type="checkbox"]:checked + label::before {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.radio-container > input[type="radio"]:checked + label,
+.checkbox-container > input[type="checkbox"]:checked + label {
+  background: var(--color-primary);
+  color: var(--color-text-primary);
+  border-color: var(--color-primary);
+}
+
+.radio-container > input[type="radio"]:disabled + label,
+.checkbox-container > input[type="checkbox"]:disabled + label {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* === TEXT INPUTS === */
+.textbox-container > label {
+  display: block;
+  margin-bottom: 0;
+  font-weight: 500;
+}
+
+input[type="text"],
+input[type="number"],
+textarea {
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: var(--font-size-base);
+  font-family: var(--font-family-base);
+  color: var(--color-text-primary);
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-md);
+  outline: none;
+  transition: all var(--transition-fast);
+}
+
+input[type="text"]:focus,
+textarea:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary);
+}
+
+/* Align numeric inputs with text inputs and hide default spinners */
+.numeric-input {
+  appearance: textfield;
+  -moz-appearance: textfield;
+  background: var(--color-inline);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: var(--font-size-base);
+  font-family: var(--font-family-base);
+  border-radius: var(--border-radius-md);
+}
+
+.numeric-input::-webkit-outer-spin-button,
+.numeric-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+textarea { min-height: 80px; resize: vertical; }
+
+/* === BUTTONS === */
+button, .save {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  font-family: var(--font-family-base);
+  color: var(--color-text-primary);
+  background: var(--color-background-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-decoration: none;
+}
+
+button:hover, .save:hover {
+  background: var(--color-primary);
+  border-color: var(--color-text-primary);
+}
+
+.save { width: 100%; margin-top: var(--spacing-md); padding: var(--spacing-md); }
+
+.button-container {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: var(--spacing-sm);
+}
+
+.button-container > label {
+  flex: unset;
+  min-width: 0;
+}
+
+#downloadModeGroup,
+#imageOptions,
+#imageRefOptions {
+  min-width: 0;
+}
+
+input[type="file"] { display: none; }
+
+/* Status messages */
+.status {
+  position: fixed;
+  top: var(--spacing-md);
+  right: var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-radius: var(--border-radius-md);
+  font-weight: 500;
+  opacity: 0;
+  transition: opacity var(--transition-base);
+  z-index: 100;
+}
+
+.status.success { background: var(--color-background-secondary); color: var(--color-text-primary); border: 1px solid var(--color-border); }
+.status.error { background: var(--color-error); color: var(--color-background); border: 1px solid var(--color-error); }
+
+/* Input sizer */
+.input-sizer { position: relative; width: 100%; min-height: 60px; }
+.input-sizer textarea { position: relative; width: 100%; height: 100%; min-height: 100px; }
+.input-sizer::after { content: attr(data-value) ' '; visibility: hidden; white-space: pre-wrap; font-family: inherit; font-size: inherit; padding: var(--spacing-sm) var(--spacing-md); min-height: 60px; }
+
+/* Spinner */
+@keyframes spinner { to { transform: rotate(360deg); } }
+#spinner:before {
+  content: '';
+  position: fixed;
+  top: var(--spacing-lg);
+  right: var(--spacing-lg);
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-text-primary);
+  border-radius: 50%;
+  animation: spinner 0.6s linear infinite;
+}
+
+/* Helper text */
+label p { font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-top: var(--spacing-xs); font-weight: 400; }

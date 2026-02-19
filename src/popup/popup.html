@@ -7,25 +7,92 @@
     <link rel="stylesheet" href="lib/codemirror.css">
     <link rel="stylesheet" href="lib/xq-dark.css">
     <link rel="stylesheet" href="lib/xq-light.css">
-    <link rel="stylesheet" href="popup.css">
+    <link rel="stylesheet" href="popup-refactored.css">
+    <link rel="stylesheet" href="styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   </head>
 
 <body>
   <div id="container">
-    
-    <a href="#" class="button toggle" id="downloadImages"><i class="check"></i>Download Images</a>
-    <a href="/options/options.html" id="options" target="_blank">open options</a>
-    <div class="row" id="clipOption">
-      <a href="#" class="button toggle" id="selected"><i class="check"></i>Selected Text</a>
-      <a href="#" class="button toggle" id="document"><i class="check"></i>Entire Document</a>
-    </div>
-    <a href="#" class="button toggle" id="includeTemplate"><i class="check"></i>Include front/back template</a>
-    <input type="text" id="title"></input>
-    <textarea id="md"></textarea>
-    <a href="#" class="button" id="download">Download</a>
-    <a href="#" class="button" id="downloadSelection">Download selected</a>
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <img src="../icons/Markdown-mark.svg" alt="MarkDownload" class="brand-logo">
+        <span class="brand-name">MarkDownload</span>
+      </div>
+      <a href="../options/options.html#tab=download" id="options" target="_blank" class="options-btn" title="Open download options">
+        <span class="options-label">Settings</span>
+        <span class="icon-settings" aria-hidden="true"></span>
+      </a>
+    </header>
+
+    <!-- Section Options -->
+    <section class="options-section">
+      <!-- Toggle sélection -->
+      <div class="row" id="clipOption">
+        <button type="button" class="toggle" id="selected">
+          <span class="toggle-indicator"></span>
+          <span class="toggle-label">Selected</span>
+        </button>
+        <button type="button" class="toggle" id="document">
+          <span class="toggle-indicator"></span>
+          <span class="toggle-label">Full page</span>
+        </button>
+      </div>
+
+      <!-- Toggle templates -->
+      <div class="toggle-group">
+        <button type="button" class="toggle toggle-full" id="includeTemplate">
+          <span class="toggle-indicator"></span>
+          <span class="toggle-label">Include front/back-matter</span>
+        </button>
+        <a class="toggle-settings" href="../options/options.html#tab=edit" target="_blank" title="Open templates options">
+          <span class="icon-settings" aria-hidden="true"></span>
+        </a>
+      </div>
+
+      <div class="toggle-group">
+        <button type="button" class="toggle toggle-full" id="downloadImages">
+          <span class="toggle-indicator"></span>
+          <span class="toggle-label">Include images inline</span>
+        </button>
+        <a class="toggle-settings" href="../options/options.html#tab=images" target="_blank" title="Open images options">
+          <span class="icon-settings" aria-hidden="true"></span>
+        </a>
+      </div>
+    </section>
+
+    <!-- Zone de contenu -->
+    <section class="content-section">
+      <div class="input-group">
+        <input type="text" id="title" class="title-input" placeholder="Filename...">
+      </div>
+      
+      <div class="editor-container">
+        <textarea id="md"></textarea>
+      </div>
+    </section>
+
+    <!-- Zone d'actions -->
+    <section class="actions-section">
+      <button type="button" class="btn" id="download">
+        <span class="icon-download" aria-hidden="true"></span>
+        <span>Download .md</span>
+      </button>
+      
+      <button type="button" class="btn" id="downloadSelection" style="display: none;">
+        <span class="icon-download" aria-hidden="true"></span>
+        <span>Download selection</span>
+      </button>
+    </section>
   </div>
-  <div id="spinner"></div>
+
+  <div id="spinner">
+    <div class="spinner-ring"></div>
+  </div>
+
   <script type="application/javascript" src="../browser-polyfill.min.js"></script>
   <script type="application/javascript" src="lib/codemirror.js"></script>
   <script type="application/javascript" src="lib/modes/markdown/markdown.js"></script>
