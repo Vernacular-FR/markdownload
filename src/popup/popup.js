@@ -3,6 +3,7 @@
 var selectedText = null;
 var imageList = null;
 var mdClipsFolder = '';
+let currentOptions = null;
 
 const darkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
 // set up event handlers
@@ -11,16 +12,22 @@ const cm = CodeMirror.fromTextArea(document.getElementById("md"), {
     mode: "markdown",
     lineWrapping: true
 });
-cm.on("cursorActivity", (cm) => {
-    const somethingSelected = cm.somethingSelected();
-    var a = document.getElementById("downloadSelection");
+const syncButtonsWithSelection = (hasSelection) => {
+    const selectionBtn = document.getElementById("downloadSelection");
+    const mdBtn = document.getElementById("download");
 
-    if (somethingSelected) {
-        if(a.style.display != "block") a.style.display = "block";
+    if (hasSelection) {
+        selectionBtn.classList.add("visible");
+        mdBtn.style.display = "none";
+    } else {
+        selectionBtn.classList.remove("visible");
+        mdBtn.style.display = "flex";
     }
-    else {
-        if(a.style.display != "none") a.style.display = "none";
-    }
+};
+
+cm.on("cursorActivity", (cm) => {
+    const somethingSelected = cm.listSelections().some(sel => !sel.empty());
+    syncButtonsWithSelection(somethingSelected);
 });
 document.getElementById("download").addEventListener("click", download);
 document.getElementById("downloadSelection").addEventListener("click", downloadSelection);
@@ -31,17 +38,58 @@ const defaultOptions = {
     downloadImages: false
 }
 
+const updateDownloadButtonLabel = (options) => {
+    const btn = document.getElementById("download");
+    const label = btn.querySelector("span:nth-child(2)");
+    const selectionBtn = document.getElementById("downloadSelection");
+    const selectionLabel = selectionBtn.querySelector("span:nth-child(2)");
+    if (!label) return;
+    label.textContent = options.downloadImages ? "Download .md (with images)" : "Download .md";
+    if (selectionLabel) {
+        selectionLabel.textContent = options.downloadImages ? "Download selection (with images)" : "Download selection";
+    }
+}
+
+const updateContextMenusSafe = async (options) => {
+    if (!browser.contextMenus || !browser.contextMenus.update) return;
+    try {
+        await browser.contextMenus.update("toggle-includeTemplate", {
+            checked: options.includeTemplate
+        });
+    } catch (err) {
+        console.debug('contextMenu toggle-includeTemplate missing', err);
+    }
+    try {
+        await browser.contextMenus.update("tabtoggle-includeTemplate", {
+            checked: options.includeTemplate
+        });
+    } catch (err) {
+        console.debug('contextMenu tabtoggle-includeTemplate missing', err);
+    }
+};
+
+const applyOptionsState = (options) => {
+    // include template
+    const includeBtn = document.querySelector("#includeTemplate");
+    if (includeBtn) includeBtn.classList.toggle("checked", !!options.includeTemplate);
+
+    // clip selection
+    const selBtn = document.querySelector("#selected");
+    const docBtn = document.querySelector("#document");
+    if (selBtn && docBtn) {
+        selBtn.classList.toggle("checked", !!options.clipSelection);
+        docBtn.classList.toggle("checked", !options.clipSelection);
+    }
+
+    // download images
+    const dlBtn = document.querySelector("#downloadImages");
+    if (dlBtn) dlBtn.classList.toggle("checked", !!options.downloadImages);
+
+    updateDownloadButtonLabel(options);
+};
+
 const checkInitialSettings = options => {
-    if (options.includeTemplate)
-        document.querySelector("#includeTemplate").classList.add("checked");
-
-    if (options.downloadImages)
-        document.querySelector("#downloadImages").classList.add("checked");
-
-    if (options.clipSelection)
-        document.querySelector("#selected").classList.add("checked");
-    else
-        document.querySelector("#document").classList.add("checked");
+    applyOptionsState(options);
 }
 
 const toggleClipSelection = options => {
@@ -56,23 +104,17 @@ const toggleClipSelection = options => {
 const toggleIncludeTemplate = options => {
     options.includeTemplate = !options.includeTemplate;
     document.querySelector("#includeTemplate").classList.toggle("checked");
-    browser.storage.sync.set(options).then(() => {
-        browser.contextMenus.update("toggle-includeTemplate", {
-            checked: options.includeTemplate
+    browser.storage.sync.set(options)
+        .then(() => updateContextMenusSafe(options))
+        .then(() => clipSite())
+        .catch((error) => {
+            console.error(error);
         });
-        try {
-            browser.contextMenus.update("tabtoggle-includeTemplate", {
-                checked: options.includeTemplate
-            });
-        } catch { }
-        return clipSite()
-    }).catch((error) => {
-        console.error(error);
-    });
 }
 
 const toggleDownloadImages = options => {
     options.downloadImages = !options.downloadImages;
+    currentOptions = options;
     document.querySelector("#downloadImages").classList.toggle("checked");
     browser.storage.sync.set(options).then(() => {
         browser.contextMenus.update("toggle-downloadImages", {
@@ -83,6 +125,7 @@ const toggleDownloadImages = options => {
                 checked: options.downloadImages
             });
         } catch { }
+        updateDownloadButtonLabel(options);
     }).catch((error) => {
         console.error(error);
     });
@@ -131,7 +174,9 @@ const clipSite = id => {
 
 // inject the necessary scripts
 browser.storage.sync.get(defaultOptions).then(options => {
+    currentOptions = options;
     checkInitialSettings(options);
+    syncButtonsWithSelection(false);
     
     document.getElementById("selected").addEventListener("click", (e) => {
         e.preventDefault();
@@ -148,6 +193,21 @@ browser.storage.sync.get(defaultOptions).then(options => {
     document.getElementById("downloadImages").addEventListener("click", (e) => {
         e.preventDefault();
         toggleDownloadImages(options);
+    });
+
+    // Keep popup in sync with external changes (options page / other windows)
+    browser.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'sync') return;
+        let mutated = false;
+        ['includeTemplate', 'clipSelection', 'downloadImages'].forEach(key => {
+            if (changes[key]) {
+                options[key] = changes[key].newValue;
+                mutated = true;
+            }
+        });
+        if (mutated) {
+            applyOptionsState(options);
+        }
     });
     
     return browser.tabs.query({
@@ -190,7 +250,29 @@ function sendDownloadMessage(text) {
                 title: document.getElementById("title").value,
                 tab: tabs[0],
                 imageList: imageList,
-                mdClipsFolder: mdClipsFolder
+                mdClipsFolder: mdClipsFolder,
+                options: currentOptions
+            };
+            return browser.runtime.sendMessage(message);
+        });
+    }
+}
+
+//function to send the download ZIP message to the background page
+function sendDownloadZipMessage(text, selection = false) {
+    if (text != null) {
+
+        return browser.tabs.query({
+            currentWindow: true,
+            active: true
+        }).then(tabs => {
+            var message = {
+                type: "downloadZip",
+                markdown: text,
+                title: document.getElementById("title").value,
+                tab: tabs[0],
+                clipSelection: selection,
+                options: currentOptions
             };
             return browser.runtime.sendMessage(message);
         });
@@ -200,7 +282,20 @@ function sendDownloadMessage(text) {
 // event handler for download button
 async function download(e) {
     e.preventDefault();
-    await sendDownloadMessage(cm.getValue());
+    const useSelection = document.querySelector("#selected").classList.contains("checked");
+    if (currentOptions && currentOptions.downloadImages) {
+        await sendDownloadZipMessage(cm.getValue(), useSelection);
+    } else {
+        await sendDownloadMessage(cm.getValue());
+    }
+    window.close();
+}
+
+// event handler for download ZIP button
+async function downloadZip(e) {
+    e.preventDefault();
+    const useSelection = document.querySelector("#selected").classList.contains("checked");
+    await sendDownloadZipMessage(cm.getValue(), useSelection);
     window.close();
 }
 
@@ -208,8 +303,14 @@ async function download(e) {
 async function downloadSelection(e) {
     e.preventDefault();
     if (cm.somethingSelected()) {
-        await sendDownloadMessage(cm.getSelection());
+        const selectionText = cm.getSelection();
+        if (currentOptions && currentOptions.downloadImages) {
+            await sendDownloadZipMessage(selectionText, true);
+        } else {
+            await sendDownloadMessage(selectionText);
+        }
     }
+    window.close();
 }
 
 //function that handles messages from the injected script into the site
@@ -230,6 +331,7 @@ function notify(message) {
          // focus the download button
         document.getElementById("download").focus();
         cm.refresh();
+        syncButtonsWithSelection(false);
     }
 }
 

@@ -1,0 +1,99 @@
+<div class="form-card">
+            <details>
+                <summary>
+                    <span class="summary-arrow" aria-hidden="true">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </span>
+                    <span class="summary-title">Variables index</span>
+                    <span class="summary-icon" aria-hidden="true">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" d="M12 2.5a9.5 9.5 0 1 1 0 19 9.5 9.5 0 0 1 0-19Zm0 4.3a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm-1.2 4.2a1 1 0 0 0-.8.98V17a1 1 0 1 0 2 0v-3.02a1 1 0 0 0-.8-.98Z" opacity="0.85"/>
+                        </svg>
+                    </span>
+                </summary>
+
+                <small class="instructions">For the title, as well as the front- and back-matter custom text, you can use the following text replacement values.
+                    Please note that not all websites will provide all values
+                    <ul>
+                        <li><code>{title}</code> - Article Title</li>
+                        <li><code>{pageTitle}</code> - Title of the actual page</li>
+                        <li><code>{length}</code> - Length of the article, in characters</li>
+                        <li><code>{excerpt}</code> - Article description or short excerpt from the content</li>
+                        <li><code>{byline}</code> - Author metadata</li>
+                        <li><code>{dir}</code> - Content direction</li>
+                        <li><code>{date:FORMAT}</code> - The current date and time. Check the <a href="https://momentjs.com/docs/#/displaying/format/" target="_blank" rel="noopener noreferrer">format reference</a> </li>
+                        <li><code>{keywords}</code> - Meta keywords (if present). Comma separated by default.</li>
+                        <li><code>{keywords:SEPARATOR}</code> - Meta keywords (if present) separated by SEPARATOR. For example, to separate by space, use <code>{keywords: }</code></li>
+                    </ul>
+                    There is also support for all meta tags not mentioned above, should the page you are clipping support them.
+                    For example, try <code>{og:image}</code> or any other widely supported meta tags
+                    <p>
+                        URL information:
+                        <ul>
+                            <li><code>{baseURI}</code> - The url of the article</li>
+                            <li><code>{origin}</code> - The origin of the URL, that is its scheme, its domain and its port.</li>
+                            <li><code>{host}</code> - The domain (that is the <em>hostname</em>) followed by (if a port was specified) a <code>':'</code> and the <em>port</em> of the URL.</li>
+                            <li><code>{hostname}</code> - The domain of the URL.</li>
+                            <li><code>{port}</code> - The port number of the URL.</li>
+                            <li><code>{protocol}</code> - The protocol scheme of the URL, including the final <code>':'</code>.</li>
+                            <li><code>{pathname}</code> - An initial <code>'/'</code> followed by the path of the URL, not including the query string or fragment.</li>
+                            <li><code>{search}</code> - The URL's parameter string; if any parameters are provided, this string includes all of them, beginning with the leading <code>?</code> character.</li>
+                            <li><code>{hash}</code> - A '#' followed by the fragment identifier of the URL.</li>
+                        </ul>
+                    </p>
+                    <p>
+                        Additionally, you can 'parameterize' any of the text variables (other than date and keywords) by using the following syntax:
+                        <ul>
+                            <li><code>{variable:lower}</code> - lower case: Every word lower case</li>
+                            <li><code>{variable:upper}</code> - UPPER CASE: Every word upper case</li>
+                            <li><code>{variable:pascal}</code> - PascalCase: Every word capital</li>
+                            <li><code>{variable:camel}</code> - camelCase: every word capital except the first word</li>
+                            <li><code>{variable:kebab}</code> - kebab-case: hyphens between words, all lowercase</li>
+                            <li><code>{variable:mixed-kebab}</code> - kebab-case: hyphens between words, no case changes</li>
+                            <li><code>{variable:snake}</code> - snake_case: underscores between words, all lowercase</li>
+                            <li><code>{variable:mixed_snake}</code> - snake_case: underscores between words, no case changes</li>
+                            <li><code>{variable:obsidian-cal}</code> - Compatibility for Obsidan Custom Attachment Location: hyphens between words, no case changes, double hypens removed</li>
+                        </ul>
+                    </p>
+                </small>
+            </details>
+        </div>
+
+        <div class="form-card">
+            <div class="textbox-container">
+                <h3>Title template</h3>
+                <label for="title">Template for title/filename</label>
+                <input type="text" id="title" name="title" role="textbox" />
+                <label for="maxTitleLength">Maximum title length (characters)</label>
+                <input type="text" id="maxTitleLength" name="maxTitleLength" class="numeric-input" role="textbox" inputmode="numeric" pattern="[0-9]*" min="50" max="500" placeholder="150" />
+                <label for="disallowedChars">Disallowed Characters (to strip out of title/filename —
+                    in addition to <code>/</code>, <code>?</code>, <code>&lt;</code>, <code>&gt;</code>, <code>\</code>,
+                    <code>:</code>, <code>*</code>, <code>|</code>, <code>"</code>)</label>
+                <input type="text" id="disallowedChars" name="disallowedChars" role="textbox" />
+            </div>
+        </div>
+
+        <div class="form-card">
+            <div class="textbox-container">
+                <h3>Front-matter template</h3>
+                <label for="frontmatter">Enter the text here that should appear at the top of the output file.</label>
+                <div class="input-sizer"><textarea name="frontmatter" id="frontmatter" class="textarea" role="textbox"></textarea></div>
+            </div>
+        </div>
+
+        <div class="form-card">
+            <div class="textbox-container">
+                <h3>Back-matter template</h3>
+                <label for="backmatter">Enter the text here that should appear at the bottom of the output file.</label>
+                <div class="input-sizer"><textarea name="backmatter" id="backmatter" class="textarea" role="textbox"></textarea></div>
+            </div>
+        </div>
+        
+        <div class="form-card">
+            <div class="checkbox-container">
+                <input name="includeTemplate" id="includeTemplate" type="checkbox" />
+                <label for="includeTemplate">Append front/back template to clipped text</label>
+            </div>
+        </div>

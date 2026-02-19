@@ -11,8 +11,23 @@ createMenus()
 
 TurndownService.prototype.defaultEscape = TurndownService.prototype.escape;
 
-// function to convert the article content to markdown using Turndown
-function turndown(content, options, article) {
+function findOriginalImageUrl(node) {
+  const dataSrc = node.getAttribute('data-src');
+  if (dataSrc) return dataSrc;
+  const srcset = node.getAttribute('srcset');
+  if (srcset) {
+    const sources = srcset.split(',').map(s => s.trim().split(/\s+/));
+    sources.sort((a, b) => (parseInt(b[1])||0) - (parseInt(a[1])||0));
+    return sources[0] ? sources[0][0] : null;
+  }
+  const src = node.getAttribute('src');
+  if (src && src.includes('medium.com')) return src.replace(/\/v2\/resize:[^\/]+\//g, '/');
+  return src;
+}
+
+
+// setup Turndown with optional inclusion of image links
+function setupTurndown(content, options, article, includeImageLinks = true) {
 
   if (options.turndownEscape) TurndownService.prototype.escape = TurndownService.prototype.defaultEscape;
   else TurndownService.prototype.escape = s => s;
@@ -26,20 +41,22 @@ function turndown(content, options, article) {
   let imageList = {};
   // add an image rule
   turndownService.addRule('images', {
-    filter: function (node, tdopts) {
+    filter: function (node) {
       // if we're looking at an img node with a src
       if (node.nodeName == 'IMG' && node.getAttribute('src')) {
         
         // get the original src
-        let src = node.getAttribute('src')
+        let src = node.getAttribute('src');
         // set the new src
         node.setAttribute('src', validateUri(src, article.baseURI));
         
         // if we're downloading images, there's more to do.
         if (options.downloadImages) {
+          const originalSrc = findOriginalImageUrl(node) || src;
           // generate a file name for the image
-          let imageFilename = getImageFilename(src, options, false);
-          if (!imageList[src] || imageList[src] != imageFilename) {
+          if (!originalSrc) return true;
+          let imageFilename = getImageFilename(originalSrc, options, false);
+          if (!imageList[originalSrc] || imageList[originalSrc] != imageFilename) {
             // if the imageList already contains this file, add a number to differentiate
             let i = 1;
             while (Object.values(imageList).includes(imageFilename)) {
@@ -49,7 +66,7 @@ function turndown(content, options, article) {
               imageFilename = parts.join('.');
             }
             // add it to the list of images to download later
-            imageList[src] = imageFilename;
+            imageList[originalSrc] = imageFilename;
           }
           // check if we're doing an obsidian style link
           const obsidianLink = options.imageStyle.startsWith("obsidian");
@@ -58,20 +75,21 @@ function turndown(content, options, article) {
             // if using "nofolder" then we just need the filename, no folder
             ? imageFilename.substring(imageFilename.lastIndexOf('/') + 1)
             // otherwise we may need to modify the filename to uri encode parts for a pure markdown link
-            : imageFilename.split('/').map(s => obsidianLink ? s : encodeURI(s)).join('/')
-          
+            : imageFilename.split('/').map(s => obsidianLink ? s : encodeURI(s)).join('/');
+
           // set the new src attribute to be the local filename
           if(options.imageStyle != 'originalSource' && options.imageStyle != 'base64') node.setAttribute('src', localSrc);
           // pass the filter if we're making an obsidian link (or stripping links)
           return true;
         }
-        else return true
+        else return true;
       }
       // don't pass the filter, just output a normal markdown link
       return false;
     },
-    replacement: function (content, node, tdopts) {
+    replacement: function (content, node) {
       // if we're stripping images, output nothing
+      if (!includeImageLinks) return '';
       if (options.imageStyle == 'noImage') return '';
       // if this is an obsidian link, so output that
       else if (options.imageStyle.startsWith('obsidian')) return `![[${node.getAttribute('src')}]]`;
@@ -86,123 +104,111 @@ function turndown(content, options, article) {
           this.references.push('[fig' + id + ']: ' + src + titlePart);
           return '![' + alt + '][fig' + id + ']';
         }
-        else return src ? '![' + alt + ']' + '(' + src + titlePart + ')' : ''
+        else return src ? '![' + alt + '](' + src + titlePart + ')' : '';
       }
     },
     references: [],
-    append: function (options) {
+    append: function () {
       var references = '';
       if (this.references.length) {
         references = '\n\n' + this.references.join('\n') + '\n\n';
         this.references = []; // Reset references
       }
-      return references
+      return references;
     }
 
   });
 
   // add a rule for links
   turndownService.addRule('links', {
-    filter: (node, tdopts) => {
-      // check that this is indeed a link
-      if (node.nodeName == 'A' && node.getAttribute('href')) {
-        // get the href
-        const href = node.getAttribute('href');
-        // set the new href
-        node.setAttribute('href', validateUri(href, article.baseURI));
-        // if we are to strip links, the filter needs to pass
-        return options.linkStyle == 'stripLinks';
+    filter: function (node) { return node.nodeName == 'A' && node.getAttribute('href'); },
+    replacement: function (content, node) {
+      var href = node.getAttribute('href');
+      var title = cleanAttribute(node.getAttribute('title'));
+      var titlePart = title ? ' "' + title + '"' : '';
+      if (options.linkStyle == 'inlined' || options.linkStyle == 'inlinedCaps') {
+        if (options.linkStyle == 'inlinedCaps') content = content.toUpperCase();
+        return '[' + content + '](' + href + titlePart + ')';
       }
-      // we're not passing the filter, just do the normal thing.
-      return false;
-    },
-    // if the filter passes, we're stripping links, so just return the content
-    replacement: (content, node, tdopts) => content
-  });
-
-  // handle multiple lines math
-  turndownService.addRule('mathjax', {
-    filter(node, options) {
-      return article.math.hasOwnProperty(node.id);
-    },
-    replacement(content, node, options) {
-      const math = article.math[node.id];
-      let tex = math.tex.trim().replaceAll('\xa0', '');
-
-      if (math.inline) {
-        tex = tex.replaceAll('\n', ' ');
-        return `$${tex}$`;
+      else if (options.linkStyle == 'referenced') {
+        var id = this.references.length + 1;
+        this.references.push('[' + id + ']: ' + href + titlePart);
+        return '[' + content + '][' + id + ']';
       }
-      else
-        return `$$\n${tex}\n$$`;
-    }
-  });
-
-  function repeat(character, count) {
-    return Array(count + 1).join(character);
-  }
-
-  function convertToFencedCodeBlock(node, options) {
-    node.innerHTML = node.innerHTML.replaceAll('<br-keep></br-keep>', '<br>');
-    const langMatch = node.id?.match(/code-lang-(.+)/);
-    const language = langMatch?.length > 0 ? langMatch[1] : '';
-
-    const code = node.innerText;
-
-    const fenceChar = options.fence.charAt(0);
-    let fenceSize = 3;
-    const fenceInCodeRegex = new RegExp('^' + fenceChar + '{3,}', 'gm');
-
-    let match;
-    while ((match = fenceInCodeRegex.exec(code))) {
-      if (match[0].length >= fenceSize) {
-        fenceSize = match[0].length + 1;
+      else return content;
+    },
+    references: [],
+    append: function () {
+      var references = '';
+      if (this.references.length) {
+        references = '\n\n' + this.references.join('\n') + '\n\n';
+        this.references = [];
       }
-    }
-
-    const fence = repeat(fenceChar, fenceSize);
-
-    return (
-      '\n\n' + fence + language + '\n' +
-      code.replace(/\n$/, '') +
-      '\n' + fence + '\n\n'
-    )
-  }
-
-  turndownService.addRule('fencedCodeBlock', {
-    filter: function (node, options) {
-      return (
-        options.codeBlockStyle === 'fenced' &&
-        node.nodeName === 'PRE' &&
-        node.firstChild &&
-        node.firstChild.nodeName === 'CODE'
-      );
-    },
-    replacement: function (content, node, options) {
-      return convertToFencedCodeBlock(node.firstChild, options);
+      return references;
     }
   });
 
-  // handle <pre> as code blocks
-  turndownService.addRule('pre', {
-    filter: (node, tdopts) => {
-      return node.nodeName == 'PRE'
-             && (!node.firstChild || node.firstChild.nodeName != 'CODE')
-             && !node.querySelector('img');
-    },
-    replacement: (content, node, tdopts) => {
-      return convertToFencedCodeBlock(node, tdopts);
+  turndownService.addRule('codeBlocks', {
+    filter: function (node) { return node.nodeName == 'PRE' && node.firstChild && node.firstChild.nodeName == 'CODE'; },
+    replacement: function (content, node) {
+      var code = node.firstChild.textContent;
+      var language = node.firstChild.getAttribute('class') || '';
+      if (language) language = language.replace('language-', '');
+      return '```' + language + '\n' + code + '\n```';
     }
   });
 
-  let markdown = options.frontmatter + turndownService.turndown(content)
-      + options.backmatter;
+  turndownService.addRule('code', {
+    filter: function (node) {
+      var hasSiblings = node.previousSibling || node.nextSibling;
+      var isNameCode = node.nodeName == 'CODE' && !hasSiblings;
+      return isNameCode;
+    },
+    replacement: function (content) { return '`' + content + '`'; }
+  });
 
-  // strip out non-printing special characters which CodeMirror displays as a red dot
-  // see: https://codemirror.net/doc/manual.html#option_specialChars
-  markdown = markdown.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028\u2029\ufeff\ufff9-\ufffc]/g, '');
-  
-  return { markdown: markdown, imageList: imageList };
+  turndownService.addRule('strikethrough', {
+    filter: function (node) { return node.nodeName == 'S' || node.nodeName == 'DEL' || node.nodeName == 'STRIKE'; },
+    replacement: function (content) { return '~~' + content + '~~'; }
+  });
+
+  turndownService.addRule('highlight', {
+    filter: function (node) { return node.nodeName == 'MARK'; },
+    replacement: function (content) { return '==' + content + '=='; }
+  });
+
+  turndownService.addRule('footnotes', {
+    filter: function (node) { return node.nodeName == 'SUP' && node.getAttribute('class') == 'footnote'; },
+    replacement: function (content) { return '[^' + content + ']'; }
+  });
+
+  turndownService.addRule('tables', {
+    filter: function (node) { return node.nodeName == 'TABLE'; },
+    replacement: function (content, node) {
+      var tables = [], table = [], headers = [];
+      var rows = node.querySelectorAll('tr');
+      rows.forEach(function (row) {
+        var cells = row.querySelectorAll('td, th');
+        var rowText = [];
+        cells.forEach(function (cell) {
+          var cellText = turndownService.turndown(cell.innerHTML);
+          rowText.push(cellText);
+        });
+        if (row.parentNode.nodeName == 'THEAD') headers.push(rowText);
+        else table.push(rowText);
+      });
+      if (headers.length) {
+        tables.push(headers[0].join(' | '));
+        tables.push(headers[0].map(function () { return '---'; }).join(' | '));
+      }
+      table.forEach(function (row) { tables.push(row.join(' | ')); });
+      return '\n\n' + tables.join('\n') + '\n\n';
+    }
+  });
+
+  var markdown = turndownService.turndown(content);
+  markdown = markdown.replace(/^Press enter or click to view image in full size\s*$/gmi, '').replace(/\n{3,}/g, '\n\n');
+  return { markdown, imageList };
 }
 
 function cleanAttribute(attribute) {
@@ -261,8 +267,10 @@ function getImageFilename(src, options, prependFilePath = true) {
   return imagePrefix + filename;
 }
 
-// function to replace placeholder strings with article info
+// function to replace placeholder strings with article info (enriched)
 function textReplace(string, article, disallowedChars = null) {
+  if (string == null) string = '';
+  // replace article fields
   for (const key in article) {
     if (article.hasOwnProperty(key) && key != "content") {
       let s = (article[key] || '') + '';
@@ -301,7 +309,7 @@ function textReplace(string, article, disallowedChars = null) {
     keywordMatches.forEach(match => {
       let seperator = match.substring(10, match.length - 1)
       try {
-        seperator = JSON.parse(JSON.stringify(seperator).replace(/\\\\/g, '\\'));
+        seperator = JSON.parse(JSON.stringify(seperator).replace(/\\/g, '\\'));
       }
       catch { }
       const keywordsString = (article.keywords || []).join(seperator);
@@ -323,6 +331,12 @@ async function convertArticleToMarkdown(article, downloadImages = null) {
     options.downloadImages = downloadImages;
   }
 
+  // fallback imageStyle when using paired options
+  if (!options.imageStyle && options.imageStyleWith && options.imageStyleWithout) {
+    options.imageStyle = options.downloadImages ? options.imageStyleWith : options.imageStyleWithout;
+  }
+  if (!options.downloadImages) options.imageStyle = 'noImage';
+
   // substitute front and backmatter templates if necessary
   if (options.includeTemplate) {
     options.frontmatter = textReplace(options.frontmatter, article) + '\n';
@@ -335,7 +349,26 @@ async function convertArticleToMarkdown(article, downloadImages = null) {
   options.imagePrefix = textReplace(options.imagePrefix, article, options.disallowedChars)
     .split('/').map(s=>generateValidFileName(s, options.disallowedChars)).join('/');
 
-  let result = turndown(article.content, options, article);
+  // includeImageLinks suit downloadImages ; imageList reste complet pour le download
+  const includeImageLinks = !!options.downloadImages;
+  let result = setupTurndown(article.content, options, article, includeImageLinks);
+
+  // if inserting images, filter imageList to only include images actually referenced in the markdown
+  if (options.downloadImages && includeImageLinks) {
+    const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g; let match; const usedImages = new Set();
+    while ((match = imageRegex.exec(result.markdown)) !== null) {
+      const imageUrl = match[2];
+      if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://') && !imageUrl.startsWith('data:')) {
+        for (const [src, localPath] of Object.entries(result.imageList)) {
+          const normalized = localPath.split('\\').join('/').replace(/^\//, '');
+          if (imageUrl === normalized || imageUrl.endsWith(normalized)) { usedImages.add(src); break; }
+        }
+      }
+    }
+    const newImageList = {}; for (const src of usedImages) newImageList[src] = result.imageList[src];
+    result.imageList = newImageList;
+  }
+
   if (options.downloadImages && options.downloadMode == 'downloadsApi') {
     // pre-download the images
     result = await preDownloadImages(result.imageList, result.markdown);
@@ -344,17 +377,17 @@ async function convertArticleToMarkdown(article, downloadImages = null) {
 }
 
 // function to turn the title into a valid file name
-function generateValidFileName(title, disallowedChars = null) {
+function generateValidFileName(title, disallowedChars = null, maxLength = null) {
   if (!title) return title;
-  else title = title + '';
-  // remove < > : " / \ | ? * 
-  var illegalRe = /[\/\?<>\\:\*\|":]/g;
-  // and non-breaking spaces (thanks @Licat)
-  var name = title.replace(illegalRe, "").replace(new RegExp('\u00A0', 'g'), ' ')
-      // collapse extra whitespace
-      .replace(new RegExp(/\s+/, 'g'), ' ')
-      // remove leading/trailing whitespace that can cause issues when using {pageTitle} in a download path
-      .trim();
+  title = title + '';
+
+  // remove characters invalid for filenames and collapse whitespace
+  const illegalRe = /[\/\?<>\\:\*\|":]/g;
+  let name = title
+    .replace(illegalRe, "")
+    .replace(new RegExp('\u00A0', 'g'), ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   if (disallowedChars) {
     for (let c of disallowedChars) {
@@ -362,7 +395,15 @@ function generateValidFileName(title, disallowedChars = null) {
       name = name.replace(new RegExp(c, 'g'), '');
     }
   }
-  
+
+  // optional smart truncation
+  if (maxLength && name.length > maxLength) {
+    const lastSpace = name.lastIndexOf(' ', maxLength);
+    if (lastSpace > maxLength * 0.7) name = name.substring(0, lastSpace);
+    else name = name.substring(0, maxLength);
+    name = name.trim();
+  }
+
   return name;
 }
 
@@ -394,7 +435,7 @@ async function preDownloadImages(imageList, markdown) {
           else {
 
             let newFilename = filename;
-            if (newFilename.endsWith('.idunno')) {
+            if (newFilename.endsWith('.idunno') && typeof mimedb !== 'undefined') {
               // replace any unknown extension with a lookup based on mime type
               newFilename = filename.replace('.idunno', '.' + mimedb[blob.type]);
 
@@ -435,46 +476,20 @@ async function downloadMarkdown(markdown, title, tabId, imageList = {}, mdClipsF
   
   // download via the downloads API
   if (options.downloadMode == 'downloadsApi' && browser.downloads) {
-    
-    // create the object url with markdown data as a blob
-    const url = URL.createObjectURL(new Blob([markdown], {
-      type: "text/markdown;charset=utf-8"
-    }));
-  
+    const hasImages = options.downloadImages && Object.keys(imageList).length > 0;
+    // mode dossier avancé si images
+    if (hasImages) {
+      await downloadFolder(markdown, title, tabId, imageList, mdClipsFolder);
+      return;
+    }
+    // sinon single-file markdown
+    const url = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
     try {
-
       if(mdClipsFolder && !mdClipsFolder.endsWith('/')) mdClipsFolder += '/';
-      // start the download
-      const id = await browser.downloads.download({
-        url: url,
-        filename: mdClipsFolder + title + ".md",
-        saveAs: options.saveAs
-      });
-
-      // add a listener for the download completion
+      const id = await browser.downloads.download({ url: url, filename: mdClipsFolder + title + ".md", saveAs: options.saveAs });
       browser.downloads.onChanged.addListener(downloadListener(id, url));
-
-      // download images (if enabled)
-      if (options.downloadImages) {
-        // get the relative path of the markdown file (if any) for image path
-        let destPath = mdClipsFolder + title.substring(0, title.lastIndexOf('/'));
-        if(destPath && !destPath.endsWith('/')) destPath += '/';
-        Object.entries(imageList).forEach(async ([src, filename]) => {
-          // start the download of the image
-          const imgId = await browser.downloads.download({
-            url: src,
-            // set a destination path (relative to md file)
-            filename: destPath ? destPath + filename : filename,
-            saveAs: false
-          })
-          // add a listener (so we can release the blob url)
-          browser.downloads.onChanged.addListener(downloadListener(imgId, src));
-        });
-      }
     }
-    catch (err) {
-      console.error("Download failed", err);
-    }
+    catch (err) { console.error("Download failed", err); }
   }
   // // download via obsidian://new uri
   // else if (options.downloadMode == 'obsidianUri') {
@@ -666,8 +681,43 @@ async function ensureScripts(tabId) {
   // has been defined. If this is not the case, then we need to run
   // pageScraper.js to define function getSelectionAndDom.
   if (!results || results[0] !== true) {
-    await browser.tabs.executeScript(tabId, {file: "/contentScript/contentScript.js"});
+    await browser.tabs.executeScript(tabId, {file: "content/content.js"});
   }
+}
+
+// download dossier avancé (markdown + sous-dossier images) avec logs
+async function downloadFolder(markdown, title, tabId, imageList = {}, mdClipsFolder = '') {
+  console.log('[downloadFolder] Starting with', Object.keys(imageList).length, 'images');
+  const options = await getOptions();
+
+  const cleanedTitle = title.replace(/\.md$/, '').replace(/[^a-zA-Z0-9\-_]/g, '_');
+  const folderName = cleanedTitle.substring(0, 80);
+  const folderPath = (mdClipsFolder ? mdClipsFolder : '') + folderName + '/';
+
+  console.log('[downloadFolder] Creating markdown blob...');
+  const mdUrl = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
+  const mdFilename = folderName + '.md';
+  console.log('[downloadFolder] Starting markdown download to:', folderPath + mdFilename);
+  try {
+    const mdId = await browser.downloads.download({ url: mdUrl, filename: folderPath + mdFilename, saveAs: false });
+    console.log('[downloadFolder] Markdown download started:', mdId);
+    setTimeout(() => URL.revokeObjectURL(mdUrl), 60000);
+  } catch (err) {
+    console.error("Markdown download failed", err);
+    URL.revokeObjectURL(mdUrl);
+    return;
+  }
+
+  await Promise.all(Object.entries(imageList).map(async ([src, filename]) => {
+    console.log('[downloadFolder] Downloading image:', src.substring(0, 50), '->', filename);
+    try {
+      const relPath = filename.split('\\').join('/').replace(/^\//, '');
+      const imgId = await browser.downloads.download({ url: src, filename: folderPath + 'images/' + relPath, saveAs: false });
+      browser.downloads.onChanged.addListener(downloadListener(imgId, src));
+      console.log('[downloadFolder] Image download started:', imgId);
+    } catch (err) { console.error('[downloadFolder] Failed to download image:', src, err); }
+  }));
+  console.log('[downloadFolder] All downloads completed');
 }
 
 // get Readability article info from the dom passed in
@@ -774,7 +824,7 @@ async function getArticleFromDom(domString) {
   article.protocol = url.protocol;
   article.search = url.search;
   
-
+  
   // make sure the dom has a head
   if (dom.head) {
     // and the keywords, should they exist, as an array
@@ -824,6 +874,9 @@ async function formatTitle(article) {
   
   let title = textReplace(options.title, article, options.disallowedChars + '/');
   title = title.split('/').map(s=>generateValidFileName(s, options.disallowedChars)).join('/');
+
+  // global truncation to respect maxTitleLength
+  title = generateValidFileName(title, null, options.maxTitleLength);
   return title;
 }
 
@@ -858,10 +911,10 @@ async function downloadMarkdownFromContext(info, tab) {
   await ensureScripts(tab.id);
   const article = await getArticleFromContent(tab.id, info.menuItemId == "download-markdown-selection");
   const title = await formatTitle(article);
-  const { markdown, imageList } = await convertArticleToMarkdown(article);
-  // format the mdClipsFolder
+  const { markdown, imageList } = await convertArticleToMarkdown(article, (await getOptions()).downloadImages);
   const mdClipsFolder = await formatMdClipsFolder(article);
-  await downloadMarkdown(markdown, title, tab.id, imageList, mdClipsFolder); 
+  const includeImages = (await getOptions()).downloadImages;
+  await downloadMarkdown(markdown, title, tab.id, imageList, mdClipsFolder, !includeImages); 
 
 }
 

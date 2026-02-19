@@ -1,0 +1,68 @@
+ <div class="form-card">
+            <h3>Image downloading</h3>
+            <p class="section-description text-muted leading-relaxed">
+                <strong>Note:</strong> This option is directly accessible from the popup when downloading a page.
+            </p>
+            <!--
+            <div class="checkbox-container" id="downloadImages-container">
+                <input name="downloadImages" id="downloadImages" type="checkbox" />
+                <label for="downloadImages">Download images alongside markdown files</label>
+            </div>
+            -->
+            <div class="textbox-container" id="imagePrefix">
+                <label for="imagePrefix">Image filename prefix template: </label>
+                <input type="text" name="imagePrefix" role="textbox" />
+            </div>
+        </div>
+
+        <div class="form-card">
+            <h3>Image Style</h3>
+            <label for="imagePrefix"> <u>Without</u> image downloading: </label>
+            <div class="radio-container" id="imageOptionsWithout">
+                <input type="radio" name="imageStyleWithout" id="originalSource" value="originalSource" />
+                <label for="originalSource">Original Source
+                    <pre>![](http://example.com/img/image.jpg)</pre>
+                </label>
+                <input type="radio" name="imageStyleWithout" id="noImage" value="noImage" />
+                <label for="noImage">No image references
+                    <pre> &nbsp; &nbsp; &nbsp; </pre>
+                </label>
+            </div>
+            <label for="imagePrefix"> <br> <u>With</u> image downloading: </label>
+            <div class="radio-container" id="imageOptionsWith">
+                <p class="section-description text-muted leading-relaxed"><strong>Note:</strong> The following only apply if Download Images is on.</p>
+                <input type="radio" name="imageStyleWith" id="markdown" value="markdown" />
+                <label for="markdown">Pure Markdown
+                    <pre>![](folder/image.jpg)</pre>
+                </label>
+                <input type="radio" name="imageStyleWith" id="obsidian" value="obsidian" />
+                <label for="obsidian">Obsidian internal embed
+                    <pre>![[folder/image.jpg]]</pre>
+                </label>
+                <input type="radio" name="imageStyleWith" id="obsidian-nofolder" value="obsidian-nofolder" />
+                <label for="obsidian-nofolder">Obsidian internal embed (no folder prefix)
+                    <pre>![[image.jpg]]</pre>
+                </label>
+                <input type="radio" name="imageStyleWith" id="base64" value="base64" />
+                <label for="base64">Base64 encoded
+                    <pre>![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==)</pre>
+                </label>
+            </div>
+        </div>
+
+        <div class="form-card">
+            <h3>Image Reference Style</h3>
+            <p class="section-description text-muted leading-relaxed"><strong>Note:</strong> The following only apply if Image Style is markdown (not Obsidian-styled).</p>
+            <div class="radio-container" id="imageRefOptions">
+                <input type="radio" name="imageRefStyle" id="img-inlined" value="inlined" />
+                <label for="img-inlined">Inlined
+                    <pre>![](address/of/image.jpg)</pre>
+                </label>
+                <input type="radio" name="imageRefStyle" id="img-referenced" value="referenced" />
+                <label for="img-referenced">Referenced
+                    <pre> ![][fig1]
+
+[fig1]: address/of/image.jpg</pre>
+                </label>
+            </div>
+        </div>

@@ -1,0 +1,320 @@
+/* COMPONENT STYLES FOR MARKDOWNLOAD POPUP */
+
+/* Header */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px !important;
+  height: 40px;
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.brand-logo {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+@media (prefers-color-scheme: dark) {
+  .brand-logo {
+    filter: brightness(0) invert(1);
+  }
+}
+
+.brand-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.options-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 26px;
+  color: var(--color-text-muted);
+  border-radius: 6px;
+  transition: all 120ms;
+  font-size: 11px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.options-btn:hover {
+  color: var(--color-text);
+  background: var(--color-surface-active);
+}
+
+/* Toggles */
+.row {
+  display: flex;
+  gap: 6px;
+}
+
+.toggle-group {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.toggle-group .toggle {
+  flex: 1;
+}
+
+.toggle-settings {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  transition: all 120ms;
+  text-decoration: none;
+}
+
+.toggle-settings:hover {
+  color: var(--color-text);
+  background: var(--color-surface-active);
+  border-color: var(--color-border-strong);
+  box-shadow: 0 0 0 1px var(--color-border-strong);
+}
+
+.toggle {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 12px !important;
+  padding: 4px 12px !important;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 120ms;
+  flex: 1;
+  min-height: 28px;
+}
+
+.toggle:hover {
+  background: var(--color-surface-active);
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+  box-shadow: 0 0 0 1px var(--color-border-strong);
+  transform: translateY(-1px);
+}
+
+.toggle:active {
+  transform: translateY(0);
+}
+
+.toggle.checked {
+  background: var(--color-surface-active) !important;
+  border-color: var(--color-border-strong) !important;
+  color: var(--color-text);
+}
+
+.toggle-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+  transition: all 120ms;
+  flex-shrink: 0;
+}
+
+.toggle.checked .toggle-indicator {
+  opacity: 1;
+  box-shadow: 0 0 0 1px var(--color-text);
+  filter: drop-shadow(0 0 5px rgba(245, 246, 248, 0.6));
+}
+
+.toggle-label {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.toggle.checked .toggle-label {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.toggle-full {
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  gap: 12px !important;
+  text-align: center;
+  min-height: 28px;
+  padding: 4px 12px !important;
+}
+
+.toggle-full.checked .toggle-label {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Inputs (title + editor) */
+.title-input {
+  width: 100%;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-field);
+  background: var(--color-surface-strong) !important;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  transition: all 120ms;
+  outline: none;
+}
+
+.title-input:hover {
+  border-color: var(--color-border-strong);
+}
+
+.title-input:focus {
+  border-color: var(--color-border-strong);
+  box-shadow: 0 0 0 1px var(--color-border-strong);
+  background: var(--color-surface-strong);
+}
+
+.title-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.editor-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-strong) !important;
+}
+
+.CodeMirror {
+  flex: 1;
+  background: transparent !important;
+  font-family: 'JetBrains Mono', 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-field);
+}
+
+.CodeMirror-focused {
+  border-color: #3a3a3f;
+}
+
+/* Buttons */
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 120ms;
+  outline: none;
+  width: 100%;
+  min-height: 28px;
+}
+
+.btn:hover {
+  background: var(--color-surface-active);
+  color: var(--color-text);
+  border-color: var(--color-border-strong);
+  box-shadow: 0 0 0 1px var(--color-border-strong);
+  transform: translateY(-1px);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.btn svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+/* Icons */
+.icon-settings {
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+  background: currentColor;
+  -webkit-mask: url('../../icons/settings.svg') center/contain no-repeat;
+  mask: url('../../icons/settings.svg') center/contain no-repeat;
+}
+
+.icon-download {
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+  background: currentColor;
+  -webkit-mask: url('../../icons/download-minimalistic-svgrepo-com.svg') center/contain no-repeat;
+  mask: url('../../icons/download-minimalistic-svgrepo-com.svg') center/contain no-repeat;
+}
+
+.btn .icon-download {
+  width: 16px;
+  height: 16px;
+}
+
+/* Utilities */
+.visible {
+  display: flex !important;
+}
+
+*:focus-visible {
+  outline: 1px solid #6a6a6f;
+  outline-offset: 1px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #3a3a3f;
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #6a6a6f;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3f transparent;
+}

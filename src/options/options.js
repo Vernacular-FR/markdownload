@@ -2,13 +2,30 @@ let options = defaultOptions;
 let keyupTimeout = null;
 
 
+const clampMaxTitle = (raw) => {
+    const val = parseInt(raw, 10);
+    if (Number.isNaN(val)) return 150;
+    return Math.min(500, Math.max(50, val));
+}
+
+const sanitizeMaxTitleInput = () => {
+    const el = document.querySelector("[name='maxTitleLength']");
+    if (!el) return;
+    const digits = (el.value || '').replace(/[^0-9]/g, '');
+    el.value = digits;
+    el.value = clampMaxTitle(el.value);
+}
+
 const saveOptions = e => {
     e.preventDefault();
+
+    sanitizeMaxTitleInput();
 
     options = {
         frontmatter: document.querySelector("[name='frontmatter']").value,
         backmatter: document.querySelector("[name='backmatter']").value,
         title: document.querySelector("[name='title']").value,
+        maxTitleLength: clampMaxTitle(document.querySelector("[name='maxTitleLength']").value),
         disallowedChars: document.querySelector("[name='disallowedChars']").value,
         includeTemplate: document.querySelector("[name='includeTemplate']").checked,
         saveAs: document.querySelector("[name='saveAs']").checked,
@@ -30,7 +47,8 @@ const saveOptions = e => {
         strongDelimiter: getCheckedValue(document.querySelectorAll("input[name='strongDelimiter']")),
         linkStyle: getCheckedValue(document.querySelectorAll("input[name='linkStyle']")),
         linkReferenceStyle: getCheckedValue(document.querySelectorAll("input[name='linkReferenceStyle']")),
-        imageStyle: getCheckedValue(document.querySelectorAll("input[name='imageStyle']")),
+        imageStyleWithout: getCheckedValue(document.querySelectorAll("input[name='imageStyleWithout']")),
+        imageStyleWith: getCheckedValue(document.querySelectorAll("input[name='imageStyleWith']")),
         imageRefStyle: getCheckedValue(document.querySelectorAll("input[name='imageRefStyle']")),
         downloadMode: getCheckedValue(document.querySelectorAll("input[name='downloadMode']")),
         // obsidianPathType: getCheckedValue(document.querySelectorAll("input[name='obsidianPathType']")),
@@ -38,6 +56,114 @@ const saveOptions = e => {
 
     save();
 }
+
+// === MAX TITLE LENGTH GUARD ===
+let maxTitleGuardAttached = false;
+
+const setupMaxTitleLengthGuard = () => {
+    if (maxTitleGuardAttached) return;
+
+    const el = document.querySelector("[name='maxTitleLength']");
+    if (!el) return;
+
+    const sanitize = () => {
+        if (!el) return;
+        const digits = (el.value || '').replace(/[^0-9]/g, '');
+        if (digits !== el.value) {
+            el.value = digits;
+        }
+    };
+
+    el.addEventListener('input', (e) => {
+        requestAnimationFrame(sanitize);
+    }, true);
+
+    el.addEventListener('keydown', (e) => {
+        if (e.key.length === 1 && !/[0-9]/.test(e.key)) {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+        }
+    }, true);
+
+    el.addEventListener('paste', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const paste = (e.clipboardData || window.clipboardData).getData('text');
+        const digits = paste.replace(/[^0-9]/g, '');
+        el.value = (el.value || '') + digits;
+    }, true);
+
+    maxTitleGuardAttached = true;
+};
+
+// Fallback: Use event delegation at document level
+document.addEventListener('beforeinput', (e) => {
+    if (e.target?.name === 'maxTitleLength') {
+        if (e.inputType === 'insertText' && e.data && !/^[0-9]$/.test(e.data)) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+    }
+}, true);
+
+document.addEventListener('input', (e) => {
+    if (e.target?.name === 'maxTitleLength') {
+        const el = e.target;
+        const digits = (el.value || '').replace(/[^0-9]/g, '');
+        if (digits !== el.value) {
+            el.value = digits;
+        }
+    }
+}, true);
+
+document.addEventListener('keydown', (e) => {
+    if (e.target?.name === 'maxTitleLength') {
+        if (e.key.length === 1 && !/[0-9]/.test(e.key)) {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+        }
+    }
+}, true);
+
+// Watch for element to be added to DOM
+const observer = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+                const el = node.querySelector?.("[name='maxTitleLength']");
+                if (el) {
+                    setupMaxTitleLengthGuard();
+                    return;
+                }
+            }
+        }
+    }
+});
+
+observer.observe(document.body, { childList: true, subtree: true, attributes: false, characterData: false });
+
+// Also try immediately and on tab content load
+window.addEventListener('tabContentLoaded', () => {
+    setTimeout(() => {
+        const el = document.querySelector("[name='maxTitleLength']");
+        if (el) {
+            setupMaxTitleLengthGuard();
+        } else {
+            // no-op; element not yet present
+        }
+    }, 200);
+});
+
+setTimeout(() => {
+    const el = document.querySelector("[name='maxTitleLength']");
+    if (el) {
+        setupMaxTitleLengthGuard();
+    } else {
+        // element absent on initial check
+    }
+}, 1000);
 
 const save = () => {
     const spinner = document.getElementById("spinner");
@@ -94,8 +220,21 @@ function hideStatus() {
 const setCurrentChoice = result => {
     options = result;
 
+    // Migration / fallback to ensure both imageStyle groups always have a value
+    if (!options.imageStyleWith && options.imageStyle) {
+        options.imageStyleWith = options.imageStyle;
+    }
+    if (!options.imageStyleWithout) {
+        // If old imageStyle existed and was not obsidian, reuse it for without; else default
+        const legacy = options.imageStyle || defaultOptions.imageStyleWithout;
+        options.imageStyleWithout = legacy === 'noImage' ? 'noImage' : defaultOptions.imageStyleWithout;
+    }
+    if (!options.imageStyleWith) options.imageStyleWith = defaultOptions.imageStyleWith;
+    if (!options.imageStyleWithout) options.imageStyleWithout = defaultOptions.imageStyleWithout;
+
+    console.log('setCurrentChoice called with options:', options);
+
     // if browser doesn't support the download api (i.e. Safari)
-    // we have to use contentLink download mode
     if (!browser.downloads) {
         options.downloadMode = 'contentLink';
         document.querySelectorAll("[name='downloadMode']").forEach(el => el.disabled = true)
@@ -104,67 +243,76 @@ const setCurrentChoice = result => {
 
     const downloadImages = options.downloadImages && options.downloadMode == 'downloadsApi';
 
-    if (!downloadImages && (options.imageStyle == 'markdown' || options.imageStyle.startsWith('obsidian'))) {
-        options.imageStyle = 'originalSource';
-    }
+    // Compute combined imageStyle for downstream code (background uses imageStyle)
+    options.imageStyle = downloadImages ? options.imageStyleWith : options.imageStyleWithout;
 
-    document.querySelector("[name='frontmatter']").value = options.frontmatter;
+    safeSetValue("[name='frontmatter']", options.frontmatter);
     textareaInput.bind(document.querySelector("[name='frontmatter']"))();
-    document.querySelector("[name='backmatter']").value = options.backmatter;
+    safeSetValue("[name='backmatter']", options.backmatter);
     textareaInput.bind(document.querySelector("[name='backmatter']"))();
-    document.querySelector("[name='title']").value = options.title;
-    document.querySelector("[name='disallowedChars']").value = options.disallowedChars;
-    document.querySelector("[name='includeTemplate']").checked = options.includeTemplate;
-    document.querySelector("[name='saveAs']").checked = options.saveAs;
-    document.querySelector("[name='downloadImages']").checked = options.downloadImages;
-    document.querySelector("[name='imagePrefix']").value = options.imagePrefix;
-    document.querySelector("[name='mdClipsFolder']").value = result.mdClipsFolder;
-    document.querySelector("[name='turndownEscape']").checked = options.turndownEscape;
-    document.querySelector("[name='contextMenus']").checked = options.contextMenus;
-    document.querySelector("[name='obsidianIntegration']").checked = options.obsidianIntegration;
-    document.querySelector("[name='obsidianVault']").value = options.obsidianVault;
-    document.querySelector("[name='obsidianFolder']").value = options.obsidianFolder;
+    safeSetValue("[name='title']", options.title);
+    safeSetValue("[name='maxTitleLength']", options.maxTitleLength);
+    sanitizeMaxTitleInput();
+    safeSetValue("[name='disallowedChars']", options.disallowedChars);
+    safeSetValue("[name='includeTemplate']", options.includeTemplate, 'checked');
+    safeSetValue("[name='saveAs']", options.saveAs, 'checked');
+    safeSetValue("[name='downloadImages']", options.downloadImages, 'checked');
+    safeSetValue("[name='imagePrefix']", options.imagePrefix);
+    safeSetValue("[name='mdClipsFolder']", options.mdClipsFolder);
+    safeSetValue("[name='turndownEscape']", options.turndownEscape, 'checked');
+    safeSetValue("[name='contextMenus']", options.contextMenus, 'checked');
+    safeSetValue("[name='obsidianIntegration']", options.obsidianIntegration, 'checked');
+    safeSetValue("[name='obsidianVault']", options.obsidianVault);
+    safeSetValue("[name='obsidianFolder']", options.obsidianFolder);
 
-    setCheckedValue(document.querySelectorAll("[name='headingStyle']"), options.headingStyle);
-    setCheckedValue(document.querySelectorAll("[name='hr']"), options.hr);
-    setCheckedValue(document.querySelectorAll("[name='bulletListMarker']"), options.bulletListMarker);
-    setCheckedValue(document.querySelectorAll("[name='codeBlockStyle']"), options.codeBlockStyle);
-    setCheckedValue(document.querySelectorAll("[name='fence']"), options.fence);
-    setCheckedValue(document.querySelectorAll("[name='emDelimiter']"), options.emDelimiter);
-    setCheckedValue(document.querySelectorAll("[name='strongDelimiter']"), options.strongDelimiter);
-    setCheckedValue(document.querySelectorAll("[name='linkStyle']"), options.linkStyle);
-    setCheckedValue(document.querySelectorAll("[name='linkReferenceStyle']"), options.linkReferenceStyle);
-    setCheckedValue(document.querySelectorAll("[name='imageStyle']"), options.imageStyle);
-    setCheckedValue(document.querySelectorAll("[name='imageRefStyle']"), options.imageRefStyle);
-    setCheckedValue(document.querySelectorAll("[name='downloadMode']"), options.downloadMode);
-    // setCheckedValue(document.querySelectorAll("[name='obsidianPathType']"), options.obsidianPathType);
+    safeSetRadio("[name='headingStyle']", options.headingStyle);
+    safeSetRadio("[name='hr']", options.hr);
+    safeSetRadio("[name='bulletListMarker']", options.bulletListMarker);
+    safeSetRadio("[name='codeBlockStyle']", options.codeBlockStyle);
+    safeSetRadio("[name='fence']", options.fence);
+    safeSetRadio("[name='emDelimiter']", options.emDelimiter);
+    safeSetRadio("[name='strongDelimiter']", options.strongDelimiter);
+    safeSetRadio("[name='linkStyle']", options.linkStyle);
+    safeSetRadio("[name='linkReferenceStyle']", options.linkReferenceStyle);
+    safeSetRadio("[name='imageStyleWithout']", options.imageStyleWithout);
+    safeSetRadio("[name='imageStyleWith']", options.imageStyleWith);
+    safeSetRadio("[name='imageRefStyle']", options.imageRefStyle);
+    safeSetRadio("[name='downloadMode']", options.downloadMode);
 
     refereshElements();
 }
 
 const restoreOptions = () => {
-    
 
     const onError = error => {
         console.error(error);
     }
 
-    browser.storage.sync.get(defaultOptions).then(setCurrentChoice, onError);
+    // Ensure DOM is ready before loading options
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            browser.storage.sync.get(defaultOptions).then(setCurrentChoice, onError);
+        });
+    } else {
+        browser.storage.sync.get(defaultOptions).then(setCurrentChoice, onError);
+    }
 }
 
 function textareaInput(){
-    this.parentNode.dataset.value = this.value;
+    if (this.parentNode) {
+        this.parentNode.dataset.value = this.value;
+    }
 }
 
-const show = (el, show) => {
-    el.style.height = show ? el.dataset.height + 'px' : "0";
-    el.style.opacity = show ? "1" : "0";
-}
+// NOTE: show() function is now in scripts/dom-utils.js
 
 const refereshElements = () => {
-    document.getElementById("downloadModeGroup").querySelectorAll('.radio-container,.checkbox-container,.textbox-container').forEach(container => {
-        show(container, options.downloadMode == 'downloadsApi')
-    });
+    const downloadModeGroup = document.getElementById("downloadModeGroup");
+    if (downloadModeGroup) {
+        downloadModeGroup.querySelectorAll('.radio-container,.checkbox-container,.textbox-container').forEach(container => {
+            show(container, options.downloadMode == 'downloadsApi')
+        });
+    }
 
     // document.getElementById("obsidianUriGroup").querySelectorAll('.radio-container,.checkbox-container,.textbox-container').forEach(container => {
     //     show(container, options.downloadMode == 'obsidianUri')
@@ -173,7 +321,12 @@ const refereshElements = () => {
 
     show(document.getElementById("linkReferenceStyle"), (options.linkStyle == "referenced"));
 
-    show(document.getElementById("imageRefOptions"), (!options.imageStyle.startsWith("obsidian") && options.imageStyle != "noImage"));
+    // Always show image reference style radio buttons
+    show(document.getElementById("imageRefOptions"), true);
+
+    // Always show image style sections (with/without) regardless of checkbox state
+    show(document.getElementById("imageOptionsWithout"), true);
+    show(document.getElementById("imageOptionsWith"), true);
 
     show(document.getElementById("fence"), (options.codeBlockStyle == "fenced"));
 
@@ -181,12 +334,17 @@ const refereshElements = () => {
 
     show(document.getElementById("imagePrefix"), downloadImages);
 
-    document.getElementById('markdown').disabled = !downloadImages;
-    document.getElementById('base64').disabled = !downloadImages;
-    document.getElementById('obsidian').disabled = !downloadImages;
-    document.getElementById('obsidian-nofolder').disabled = !downloadImages;
+    options.imageStyle = downloadImages ? options.imageStyleWith : options.imageStyleWithout;
 
-    
+    ['markdown', 'base64', 'obsidian', 'obsidian-nofolder'].forEach(id => {
+        const input = document.getElementById(id);
+        if (input) input.disabled = !downloadImages;
+    });
+
+    // Always keep radio inputs enabled for selection
+    document.querySelectorAll("[name='imageStyleWith'], [name='imageStyleWithout']").forEach(input => {
+        input.disabled = false;
+    });
 }
 
 const inputChange = e => {
@@ -249,11 +407,23 @@ const buttonClick = (e) => {
 }
 
 const loaded = () => {
-    document.querySelectorAll('.radio-container,.checkbox-container,.textbox-container,.button-container').forEach(container => {
-        container.dataset.height = container.clientHeight;
-    });
-
     restoreOptions();
+
+    // Listen for storage changes to keep options page synchronized
+    browser.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName === 'sync') {
+            // Update global options with changed values
+            Object.keys(changes).forEach(key => {
+                if (changes[key].newValue !== undefined) {
+                    options[key] = changes[key].newValue;
+                }
+            });
+
+            // Update UI with new values
+            setCurrentChoice(options);
+            refereshElements();
+        }
+    });
 
     document.querySelectorAll('input,textarea,button').forEach(input => {
         if (input.tagName == "TEXTAREA" || input.type == "text") {
@@ -264,6 +434,25 @@ const loaded = () => {
         }
         else input.addEventListener('change', inputChange);
     })
+
+    // Force refresh of all radio buttons after a short delay to ensure they're set
+    setTimeout(() => {
+        console.log('Forcing refresh of all radio buttons...');
+        setCheckedValue(document.querySelectorAll("[name='headingStyle']"), options.headingStyle);
+        setCheckedValue(document.querySelectorAll("[name='hr']"), options.hr);
+        setCheckedValue(document.querySelectorAll("[name='bulletListMarker']"), options.bulletListMarker);
+        setCheckedValue(document.querySelectorAll("[name='codeBlockStyle']"), options.codeBlockStyle);
+        setCheckedValue(document.querySelectorAll("[name='fence']"), options.fence);
+        setCheckedValue(document.querySelectorAll("[name='emDelimiter']"), options.emDelimiter);
+        setCheckedValue(document.querySelectorAll("[name='strongDelimiter']"), options.strongDelimiter);
+        setCheckedValue(document.querySelectorAll("[name='linkStyle']"), options.linkStyle);
+        setCheckedValue(document.querySelectorAll("[name='linkReferenceStyle']"), options.linkReferenceStyle);
+        setCheckedValue(document.querySelectorAll("[name='imageStyleWithout']"), options.imageStyleWithout);
+        setCheckedValue(document.querySelectorAll("[name='imageStyleWith']"), options.imageStyleWith);
+        setCheckedValue(document.querySelectorAll("[name='imageRefStyle']"), options.imageRefStyle);
+        setCheckedValue(document.querySelectorAll("[name='downloadMode']"), options.downloadMode);
+        console.log('Radio buttons refreshed');
+    }, 200);
 }
 
 document.addEventListener("DOMContentLoaded", loaded);
@@ -275,39 +464,4 @@ document.querySelectorAll(".input-sizer > textarea").forEach(el => el.addEventLi
 // return the value of the radio button that is checked
 // return an empty string if none are checked, or
 // there are no radio buttons
-function getCheckedValue(radioObj) {
-    if (!radioObj)
-        return "";
-    var radioLength = radioObj.length;
-    if (radioLength == undefined)
-        if (radioObj.checked)
-            return radioObj.value;
-        else
-            return "";
-    for (var i = 0; i < radioLength; i++) {
-        if (radioObj[i].checked) {
-            return radioObj[i].value;
-        }
-    }
-    return "";
-}
-
-// set the radio button with the given value as being checked
-// do nothing if there are no radio buttons
-// if the given value does not exist, all the radio buttons
-// are reset to unchecked
-function setCheckedValue(radioObj, newValue) {
-    if (!radioObj)
-        return;
-    var radioLength = radioObj.length;
-    if (radioLength == undefined) {
-        radioObj.checked = (radioObj.value == newValue.toString());
-        return;
-    }
-    for (var i = 0; i < radioLength; i++) {
-        radioObj[i].checked = false;
-        if (radioObj[i].value == newValue.toString()) {
-            radioObj[i].checked = true;
-        }
-    }
-}
+// NOTE: This function is now in scripts/dom-utils.js
